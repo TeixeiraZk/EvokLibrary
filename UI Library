@@ -1,19 +1,19 @@
 --[[
-    E V O K   U I   L I B R A R Y  -  V 4
-    MATCHA AESTHETIC EDITION (PARTE 1 & 2)
+    E V O K   U I   L I B R A R Y
+    V4.1 - MATCHA AESTHETIC CLONE
+    CORREÇÃO DE AUTO-SIZE E ELEMENTOS VISUAIS
 ]]--
 
 local Evok = {
     Theme = {
-        -- Cores extraídas diretamente da sua imagem de referência
-        Background = Color3.fromRGB(18, 18, 18),
-        GroupboxBg = Color3.fromRGB(24, 24, 24),
-        GroupboxBorder = Color3.fromRGB(40, 40, 40),
-        Accent = Color3.fromRGB(245, 160, 200), -- O Rosa/Pink exato da foto
+        Background = Color3.fromRGB(15, 15, 15),
+        GroupboxBg = Color3.fromRGB(20, 20, 20),
+        Border = Color3.fromRGB(35, 35, 35),
+        Accent = Color3.fromRGB(245, 160, 200), -- Rosa Matcha
         Text = Color3.fromRGB(255, 255, 255),
-        TextMuted = Color3.fromRGB(120, 120, 120),
-        ElementBg = Color3.fromRGB(30, 30, 30),
-        Outline = Color3.fromRGB(10, 10, 10)
+        TextMuted = Color3.fromRGB(130, 130, 130),
+        ElementBg = Color3.fromRGB(25, 25, 25),
+        Thumb = Color3.fromRGB(255, 255, 255) -- Bolinha branca do slider
     }
 }
 
@@ -30,18 +30,16 @@ local function GetGuiParent()
 end
 
 local EvokGui = Instance.new("ScreenGui")
-EvokGui.Name = "EvokMatchaUI"
+EvokGui.Name = "EvokUI_" .. tostring(math.random(1000, 9999))
 EvokGui.ResetOnSpawn = false
 EvokGui.Parent = GetGuiParent()
 
-local Utility = {}
-function Utility:Tween(obj, props, time)
-    local tw = TweenService:Create(obj, TweenInfo.new(time or 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
-    tw:Play()
-    return tw
+local function Tween(obj, props, time)
+    local tw = TweenService:Create(obj, TweenInfo.new(time or 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+    tw:Play(); return tw
 end
 
-function Utility:MakeDraggable(Frame, Handle)
+local function MakeDraggable(Frame, Handle)
     local dragging, dragStart, startPos
     Handle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -57,71 +55,72 @@ function Utility:MakeDraggable(Frame, Handle)
     end)
 end
 
--- ==========================================
--- ESTRUTURA PRINCIPAL (WINDOW)
--- ==========================================
 function Evok:Window(config)
     local Main = Instance.new("Frame", EvokGui)
-    Main.Size = UDim2.new(0, 600, 0, 550)
-    Main.Position = UDim2.new(0.5, -300, 0.5, -275)
+    Main.Size = UDim2.new(0, 800, 0, 550) -- TAMANHO EXATO PEDIDO
+    Main.Position = UDim2.new(0.5, -400, 0.5, -275)
     Main.BackgroundColor3 = self.Theme.Background
-    Main.BorderColor3 = self.Theme.Outline
+    Main.BorderColor3 = self.Theme.Border
     Main.BorderSizePixel = 1
 
     local Header = Instance.new("Frame", Main)
     Header.Size = UDim2.new(1, 0, 0, 25)
-    Header.BackgroundTransparency = 1
-    Utility:MakeDraggable(Main, Header)
+    Header.BackgroundColor3 = self.Theme.Background
+    Header.BorderSizePixel = 0
+    MakeDraggable(Main, Header)
 
     local Title = Instance.new("TextLabel", Header)
     Title.Size = UDim2.new(1, -10, 1, 0)
     Title.Position = UDim2.new(0, 10, 0, 0)
     Title.BackgroundTransparency = 1
-    Title.Text = config.Name or "Evok UI"
+    Title.Text = config.Name or "Evok"
     Title.TextColor3 = self.Theme.Accent
-    Title.Font = Enum.Font.RobotoMono
+    Title.Font = Enum.Font.Code
     Title.TextSize = 13
     Title.TextXAlignment = Enum.TextXAlignment.Left
 
-    local TabContainer = Instance.new("Frame", Main)
-    TabContainer.Size = UDim2.new(1, -20, 0, 25)
-    TabContainer.Position = UDim2.new(0, 10, 0, 25)
-    TabContainer.BackgroundTransparency = 1
-    local TabList = Instance.new("UIListLayout", TabContainer)
+    local TabBar = Instance.new("Frame", Main)
+    TabBar.Size = UDim2.new(1, -20, 0, 25)
+    TabBar.Position = UDim2.new(0, 10, 0, 25)
+    TabBar.BackgroundTransparency = 1
+    local TabList = Instance.new("UIListLayout", TabBar)
     TabList.FillDirection = Enum.FillDirection.Horizontal
     TabList.Padding = UDim.new(0, 15)
 
-    local ContentContainer = Instance.new("Frame", Main)
-    ContentContainer.Size = UDim2.new(1, -20, 1, -60)
-    ContentContainer.Position = UDim2.new(0, 10, 0, 50)
-    ContentContainer.BackgroundTransparency = 1
+    local Content = Instance.new("Frame", Main)
+    Content.Size = UDim2.new(1, -20, 1, -60)
+    Content.Position = UDim2.new(0, 10, 0, 55)
+    Content.BackgroundTransparency = 1
 
     local WindowLogic = { CurrentTab = nil }
 
     function WindowLogic:Tab(nome)
-        local TabBtn = Instance.new("TextButton", TabContainer)
-        TabBtn.Size = UDim2.new(0, TextService:GetTextSize(nome, 13, Enum.Font.RobotoMono, Vector2.new(1000, 25)).X, 1, 0)
+        local TabBtn = Instance.new("TextButton", TabBar)
+        TabBtn.Size = UDim2.new(0, TextService:GetTextSize(nome, 13, Enum.Font.Code, Vector2.new(1000, 25)).X, 1, 0)
         TabBtn.BackgroundTransparency = 1
         TabBtn.Text = nome
         TabBtn.TextColor3 = Evok.Theme.TextMuted
-        TabBtn.Font = Enum.Font.RobotoMono
+        TabBtn.Font = Enum.Font.Code
         TabBtn.TextSize = 13
 
-        local TabContent = Instance.new("Frame", ContentContainer)
-        TabContent.Size = UDim2.new(1, 0, 1, 0)
-        TabContent.BackgroundTransparency = 1
-        TabContent.Visible = false
+        local TabFrame = Instance.new("Frame", Content)
+        TabFrame.Size = UDim2.new(1, 0, 1, 0)
+        TabFrame.BackgroundTransparency = 1
+        TabFrame.Visible = false
 
-        -- Layout das Colunas (Idêntico à foto)
-        local LeftCol = Instance.new("ScrollingFrame", TabContent)
+        -- Colunas Modernas com AutoSize (Impede de esmagar)
+        local LeftCol = Instance.new("ScrollingFrame", TabFrame)
         LeftCol.Size = UDim2.new(0.5, -5, 1, 0)
         LeftCol.BackgroundTransparency = 1
         LeftCol.ScrollBarThickness = 0
-        local RightCol = Instance.new("ScrollingFrame", TabContent)
+        LeftCol.AutomaticCanvasSize = Enum.AutomaticSize.Y
+
+        local RightCol = Instance.new("ScrollingFrame", TabFrame)
         RightCol.Size = UDim2.new(0.5, -5, 1, 0)
         RightCol.Position = UDim2.new(0.5, 5, 0, 0)
         RightCol.BackgroundTransparency = 1
         RightCol.ScrollBarThickness = 0
+        RightCol.AutomaticCanvasSize = Enum.AutomaticSize.Y
 
         Instance.new("UIListLayout", LeftCol).Padding = UDim.new(0, 10)
         Instance.new("UIListLayout", RightCol).Padding = UDim.new(0, 10)
@@ -130,148 +129,191 @@ function Evok:Window(config)
             if WindowLogic.CurrentTab == TabBtn then return end
             if WindowLogic.CurrentTab then
                 WindowLogic.CurrentTab.TextColor3 = Evok.Theme.TextMuted
-                ContentContainer[WindowLogic.CurrentTab.Name .. "_C"].Visible = false
+                Content[WindowLogic.CurrentTab.Name .. "_C"].Visible = false
             end
             WindowLogic.CurrentTab = TabBtn
             TabBtn.TextColor3 = Evok.Theme.Text
-            TabContent.Name = TabBtn.Name .. "_C"
-            TabContent.Visible = true
+            TabFrame.Name = TabBtn.Name .. "_C"
+            TabFrame.Visible = true
         end)
 
-        if #TabContainer:GetChildren() == 2 then
+        if #TabBar:GetChildren() == 2 then
             WindowLogic.CurrentTab = TabBtn
             TabBtn.TextColor3 = Evok.Theme.Text
-            TabContent.Name = TabBtn.Name .. "_C"
-            TabContent.Visible = true
+            TabFrame.Name = TabBtn.Name .. "_C"
+            TabFrame.Visible = true
         end
 
         local TabLogic = {}
 
-        -- ==========================================
-        -- GROUPBOX (AS CAIXAS DA IMAGEM)
-        -- ==========================================
         function TabLogic:Groupbox(config)
-            local gbSide = config.Side or "Left"
-            local TargetCol = gbSide == "Left" and LeftCol or RightCol
+            local Col = config.Side == "Right" and RightCol or LeftCol
 
-            local GBFrame = Instance.new("Frame", TargetCol)
-            GBFrame.Size = UDim2.new(1, 0, 0, 20)
-            GBFrame.BackgroundColor3 = Evok.Theme.GroupboxBg
-            GBFrame.BorderColor3 = Evok.Theme.Outline
-            GBFrame.BorderSizePixel = 1
+            local GB = Instance.new("Frame", Col)
+            GB.Size = UDim2.new(1, 0, 0, 0)
+            GB.AutomaticSize = Enum.AutomaticSize.Y -- MAGIA QUE IMPEDE DE ESMAGAR
+            GB.BackgroundColor3 = Evok.Theme.GroupboxBg
+            GB.BorderColor3 = Evok.Theme.Border
+            GB.BorderSizePixel = 1
 
-            local GBStroke = Instance.new("UIStroke", GBFrame)
-            GBStroke.Color = Evok.Theme.GroupboxBorder
+            local TitleLabel = Instance.new("TextLabel", GB)
+            TitleLabel.Size = UDim2.new(0, TextService:GetTextSize(" " .. config.Name .. " ", 12, Enum.Font.Code, Vector2.new(1000, 15)).X, 0, 15)
+            TitleLabel.Position = UDim2.new(0, 10, 0, -8) -- Corta a borda superior
+            TitleLabel.BackgroundColor3 = Evok.Theme.Background -- Esconde a linha
+            TitleLabel.Text = " " .. config.Name .. " "
+            TitleLabel.TextColor3 = Evok.Theme.Text
+            TitleLabel.Font = Enum.Font.Code
+            TitleLabel.TextSize = 12
+            TitleLabel.BorderSizePixel = 0
 
-            local GBTitle = Instance.new("TextLabel", GBFrame)
-            GBTitle.Size = UDim2.new(0, TextService:GetTextSize(" " .. config.Name .. " ", 12, Enum.Font.RobotoMono, Vector2.new(1000, 20)).X, 0, 20)
-            GBTitle.Position = UDim2.new(0, 10, 0, -10)
-            GBTitle.BackgroundColor3 = Evok.Theme.Background
-            GBTitle.Text = " " .. config.Name .. " "
-            GBTitle.TextColor3 = Evok.Theme.Text
-            GBTitle.Font = Enum.Font.RobotoMono
-            GBTitle.TextSize = 12
-            GBTitle.BorderSizePixel = 0
-
-            local GBContainer = Instance.new("Frame", GBFrame)
-            GBContainer.Size = UDim2.new(1, -20, 1, -20)
-            GBContainer.Position = UDim2.new(0, 10, 0, 15)
+            local GBContainer = Instance.new("Frame", GB)
+            GBContainer.Size = UDim2.new(1, -16, 0, 0)
+            GBContainer.Position = UDim2.new(0, 8, 0, 15)
             GBContainer.BackgroundTransparency = 1
+            GBContainer.AutomaticSize = Enum.AutomaticSize.Y
+
             local GBLayout = Instance.new("UIListLayout", GBContainer)
             GBLayout.Padding = UDim.new(0, 8)
 
-            GBLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                GBFrame.Size = UDim2.new(1, 0, 0, GBLayout.AbsoluteContentSize.Y + 25)
-                TargetCol.CanvasSize = UDim2.new(0, 0, 0, TargetCol.UIListLayout.AbsoluteContentSize.Y + 10)
-            end)
+            -- Padding invisível no fundo pro groupbox respirar
+            local Spacer = Instance.new("Frame", GBContainer)
+            Spacer.Size = UDim2.new(1, 0, 0, 4)
+            Spacer.BackgroundTransparency = 1
+            Spacer.LayoutOrder = 999
 
             local Elements = {}
 
             -- ==========================================
-            -- TOGGLE (ESTILO MATCHA - BOLINHA)
+            -- TOGGLE (BOLINHA)
             -- ==========================================
             function Elements:Toggle(cfg)
                 local state = cfg.Default or false
 
-                local TglFrame = Instance.new("TextButton", GBContainer)
-                TglFrame.Size = UDim2.new(1, 0, 0, 15)
-                TglFrame.BackgroundTransparency = 1
-                TglFrame.Text = ""
+                local Tgl = Instance.new("TextButton", GBContainer)
+                Tgl.Size = UDim2.new(1, 0, 0, 16)
+                Tgl.BackgroundTransparency = 1
+                Tgl.Text = ""
 
-                local Indicator = Instance.new("Frame", TglFrame)
-                Indicator.Size = UDim2.new(0, 12, 0, 12)
-                Indicator.Position = UDim2.new(0, 0, 0.5, -6)
-                Indicator.BackgroundColor3 = state and Evok.Theme.Accent or Evok.Theme.ElementBg
-                Indicator.BorderColor3 = Evok.Theme.Outline
-                Instance.new("UICorner", Indicator).CornerRadius = UDim.new(1, 0) -- Deixa redondo
+                local Circle = Instance.new("Frame", Tgl)
+                Circle.Size = UDim2.new(0, 14, 0, 14)
+                Circle.Position = UDim2.new(0, 0, 0.5, -7)
+                Circle.BackgroundColor3 = state and Evok.Theme.Accent or Evok.Theme.GroupboxBg
+                Circle.BorderColor3 = Evok.Theme.Border
+                Circle.BorderSizePixel = 1
+                Instance.new("UICorner", Circle).CornerRadius = UDim.new(1, 0)
 
-                local Title = Instance.new("TextLabel", TglFrame)
-                Title.Size = UDim2.new(1, -20, 1, 0)
-                Title.Position = UDim2.new(0, 20, 0, 0)
-                Title.BackgroundTransparency = 1
-                Title.Text = cfg.Name
-                Title.TextColor3 = state and Evok.Theme.Text or Evok.Theme.TextMuted
-                Title.Font = Enum.Font.RobotoMono
-                Title.TextSize = 12
-                Title.TextXAlignment = Enum.TextXAlignment.Left
+                local Lbl = Instance.new("TextLabel", Tgl)
+                Lbl.Size = UDim2.new(1, -22, 1, 0)
+                Lbl.Position = UDim2.new(0, 22, 0, 0)
+                Lbl.BackgroundTransparency = 1
+                Lbl.Text = cfg.Name
+                Lbl.TextColor3 = state and Evok.Theme.Text or Evok.Theme.TextMuted
+                Lbl.Font = Enum.Font.Code
+                Lbl.TextSize = 12
+                Lbl.TextXAlignment = Enum.TextXAlignment.Left
 
-                TglFrame.MouseButton1Click:Connect(function()
+                Tgl.MouseButton1Click:Connect(function()
                     state = not state
-                    Utility:Tween(Indicator, {BackgroundColor3 = state and Evok.Theme.Accent or Evok.Theme.ElementBg})
-                    Utility:Tween(Title, {TextColor3 = state and Evok.Theme.Text or Evok.Theme.TextMuted})
+                    Tween(Circle, {BackgroundColor3 = state and Evok.Theme.Accent or Evok.Theme.GroupboxBg})
+                    Tween(Lbl, {TextColor3 = state and Evok.Theme.Text or Evok.Theme.TextMuted})
                     if cfg.Callback then cfg.Callback(state) end
                 end)
             end
 
             -- ==========================================
-            -- SLIDER INLINE (ESTILO MATCHA)
+            -- DROPDOWN
+            -- ==========================================
+            function Elements:Dropdown(cfg)
+                local isOpen = false
+                local selected = cfg.Default or cfg.Options[1] or ""
+
+                local Drop = Instance.new("Frame", GBContainer)
+                Drop.Size = UDim2.new(1, 0, 0, 36)
+                Drop.BackgroundTransparency = 1
+
+                local Lbl = Instance.new("TextLabel", Drop)
+                Lbl.Size = UDim2.new(1, 0, 0, 14)
+                Lbl.BackgroundTransparency = 1
+                Lbl.Text = cfg.Name
+                Lbl.TextColor3 = Evok.Theme.Text
+                Lbl.Font = Enum.Font.Code
+                Lbl.TextSize = 12
+                Lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+                local Btn = Instance.new("TextButton", Drop)
+                Btn.Size = UDim2.new(1, 0, 0, 20)
+                Btn.Position = UDim2.new(0, 0, 0, 16)
+                Btn.BackgroundColor3 = Evok.Theme.ElementBg
+                Btn.BorderColor3 = Evok.Theme.Border
+                Btn.Text = "  " .. selected
+                Btn.TextColor3 = Evok.Theme.TextMuted
+                Btn.Font = Enum.Font.Code
+                Btn.TextSize = 12
+                Btn.TextXAlignment = Enum.TextXAlignment.Left
+
+                local Arrow = Instance.new("TextLabel", Btn)
+                Arrow.Size = UDim2.new(0, 20, 1, 0)
+                Arrow.Position = UDim2.new(1, -20, 0, 0)
+                Arrow.BackgroundTransparency = 1
+                Arrow.Text = "▼"
+                Arrow.TextColor3 = Evok.Theme.TextMuted
+                Arrow.Font = Enum.Font.Code
+                Arrow.TextSize = 10
+            end
+
+            -- ==========================================
+            -- SLIDER (COM NÚMERO DENTRO E BOLINHA BRANCA)
             -- ==========================================
             function Elements:Slider(cfg)
                 local min, max, val = cfg.Min or 0, cfg.Max or 100, cfg.Default or 0
 
-                local SldFrame = Instance.new("Frame", GBContainer)
-                SldFrame.Size = UDim2.new(1, 0, 0, 35)
-                SldFrame.BackgroundTransparency = 1
+                local Sld = Instance.new("Frame", GBContainer)
+                Sld.Size = UDim2.new(1, 0, 0, 32)
+                Sld.BackgroundTransparency = 1
 
-                local Title = Instance.new("TextLabel", SldFrame)
-                Title.Size = UDim2.new(1, 0, 0, 15)
-                Title.BackgroundTransparency = 1
-                Title.Text = cfg.Name
-                Title.TextColor3 = Evok.Theme.Text
-                Title.Font = Enum.Font.RobotoMono
-                Title.TextSize = 12
-                Title.TextXAlignment = Enum.TextXAlignment.Left
+                local Lbl = Instance.new("TextLabel", Sld)
+                Lbl.Size = UDim2.new(1, 0, 0, 14)
+                Lbl.BackgroundTransparency = 1
+                Lbl.Text = cfg.Name
+                Lbl.TextColor3 = Evok.Theme.Text
+                Lbl.Font = Enum.Font.Code
+                Lbl.TextSize = 12
+                Lbl.TextXAlignment = Enum.TextXAlignment.Left
 
-                local Track = Instance.new("TextButton", SldFrame)
-                Track.Size = UDim2.new(1, 0, 0, 16)
-                Track.Position = UDim2.new(0, 0, 0, 19)
+                local Track = Instance.new("TextButton", Sld)
+                Track.Size = UDim2.new(1, 0, 0, 14)
+                Track.Position = UDim2.new(0, 0, 0, 18)
                 Track.BackgroundColor3 = Evok.Theme.ElementBg
-                Track.BorderColor3 = Evok.Theme.Outline
+                Track.BorderColor3 = Evok.Theme.Border
                 Track.Text = ""
                 Track.AutoButtonColor = false
-                Instance.new("UICorner", Track).CornerRadius = UDim.new(0, 4)
 
                 local Fill = Instance.new("Frame", Track)
                 Fill.Size = UDim2.new((val - min) / (max - min), 0, 1, 0)
                 Fill.BackgroundColor3 = Evok.Theme.Accent
                 Fill.BorderSizePixel = 0
-                Instance.new("UICorner", Fill).CornerRadius = UDim.new(0, 4)
 
-                -- Texto do Valor (Igual ao "1112/2000" da foto)
-                local ValueTxt = Instance.new("TextLabel", Track)
-                ValueTxt.Size = UDim2.new(1, 0, 1, 0)
-                ValueTxt.BackgroundTransparency = 1
-                ValueTxt.Text = tostring(val) .. "/" .. tostring(max)
-                ValueTxt.TextColor3 = Evok.Theme.Text
-                ValueTxt.Font = Enum.Font.RobotoMono
-                ValueTxt.TextSize = 11
+                local Thumb = Instance.new("Frame", Fill)
+                Thumb.Size = UDim2.new(0, 14, 0, 14)
+                Thumb.Position = UDim2.new(1, -7, 0.5, -7)
+                Thumb.BackgroundColor3 = Evok.Theme.Thumb
+                Thumb.BorderSizePixel = 0
+                Instance.new("UICorner", Thumb).CornerRadius = UDim.new(1, 0)
+
+                local ValTxt = Instance.new("TextLabel", Track)
+                ValTxt.Size = UDim2.new(1, 0, 1, 0)
+                ValTxt.BackgroundTransparency = 1
+                ValTxt.Text = string.format("%s/%s", tostring(val), tostring(max))
+                ValTxt.TextColor3 = Evok.Theme.Text
+                ValTxt.Font = Enum.Font.Code
+                ValTxt.TextSize = 11
 
                 local dragging = false
                 local function update(input)
                     local pct = math.clamp((input.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
                     val = math.floor(min + ((max - min) * pct))
-                    ValueTxt.Text = tostring(val) .. "/" .. tostring(max)
-                    Utility:Tween(Fill, {Size = UDim2.new(pct, 0, 1, 0)}, 0.1)
+                    ValTxt.Text = string.format("%s/%s", tostring(val), tostring(max))
+                    Tween(Fill, {Size = UDim2.new(pct, 0, 1, 0)})
                     if cfg.Callback then cfg.Callback(val) end
                 end
 
@@ -286,48 +328,10 @@ function Evok:Window(config)
                 end)
             end
 
-            -- ==========================================
-            -- DROPDOWN
-            -- ==========================================
-            function Elements:Dropdown(cfg)
-                local isOpen = false
-                local selected = cfg.Default or cfg.Options[1]
-
-                local DropFrame = Instance.new("Frame", GBContainer)
-                DropFrame.Size = UDim2.new(1, 0, 0, 35)
-                DropFrame.BackgroundTransparency = 1
-
-                local Title = Instance.new("TextLabel", DropFrame)
-                Title.Size = UDim2.new(1, 0, 0, 15)
-                Title.BackgroundTransparency = 1
-                Title.Text = cfg.Name
-                Title.TextColor3 = Evok.Theme.Text
-                Title.Font = Enum.Font.RobotoMono
-                Title.TextSize = 12
-                Title.TextXAlignment = Enum.TextXAlignment.Left
-
-                local DropBtn = Instance.new("TextButton", DropFrame)
-                DropBtn.Size = UDim2.new(1, 0, 0, 16)
-                DropBtn.Position = UDim2.new(0, 0, 0, 19)
-                DropBtn.BackgroundColor3 = Evok.Theme.ElementBg
-                DropBtn.BorderColor3 = Evok.Theme.Outline
-                DropBtn.Text = "  " .. selected
-                DropBtn.TextColor3 = Evok.Theme.TextMuted
-                DropBtn.Font = Enum.Font.RobotoMono
-                DropBtn.TextSize = 11
-                DropBtn.TextXAlignment = Enum.TextXAlignment.Left
-                Instance.new("UICorner", DropBtn).CornerRadius = UDim.new(0, 4)
-
-                -- O resto da lógica do Dropdown iria aqui (cortei para caber no limite, mas a estética base está aplicada!)
-                -- (Na parte 3 finalizaremos o Dropdown aberto)
-            end
-
             return Elements
         end
-
         return TabLogic
     end
-
     return WindowLogic
 end
 
