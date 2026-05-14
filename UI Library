@@ -1,559 +1,310 @@
 --[[
- ___________    ____  ______    __  ___ 
-|   ____\   \  /   / /  __  \  |  |/  / 
-|  |__   \   \/   / |  |  |  | |  '  /  
-|   __|   \      /  |  |  |  | |    <   
-|  |____   \    /   |  `--'  | |  .  \  
-|_______|   \__/     \______/  |__|\__\ 
-                                 
-        E V O K   U I   L I B R A R Y
-         V3.0 - EXECUTOR EDITION
-         GITHUB.COM/TEIXEIRAZK
---]]
+    E V O K   U I   L I B R A R Y  -  V 4   U L T I M A T E
+    PARTE 1: CORE ENGINE, THEME MANAGER & WINDOW STRUCTURE
+]]--
 
 local Evok = {
-	Flags = {},
-	Config = {
-		Folder = "EvokConfigs",
-		File = "default.json"
-	}
+    Registry = {},
+    Signals = {},
+    Toggles = {},
+    Options = {},
+    Theme = {
+        -- Baseado na sua imagem, mas mantendo a alma ROXA da Evok
+        BackgroundColor = Color3.fromRGB(15, 15, 15),
+        WindowBorder = Color3.fromRGB(30, 30, 30),
+        TabBackground = Color3.fromRGB(20, 20, 20),
+        GroupboxBackground = Color3.fromRGB(18, 18, 18),
+        GroupboxBorder = Color3.fromRGB(25, 25, 25),
+        AccentColor = Color3.fromRGB(138, 43, 226), -- O Roxo que você pediu
+        TextColor = Color3.fromRGB(255, 255, 255),
+        TextMuted = Color3.fromRGB(150, 150, 150),
+        ElementColor = Color3.fromRGB(25, 25, 25),
+        OutlineColor = Color3.fromRGB(0, 0, 0)
+    }
 }
 
 -- ==========================================
--- SERVIÇOS DO ROBLOX & EXECUTOR ENVIRONMENT
+-- 1. SERVIÇOS E PROTEÇÃO
 -- ==========================================
+local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
-local TextService = game:GetService("TextService")
 local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
+local TextService = game:GetService("TextService")
 
--- Executor File System (Bypass seguro)
-local makefolder = makefolder or function() end
-local isfolder = isfolder or function() return false end
-local writefile = writefile or function() end
-local readfile = readfile or function() return "{}" end
-local delfile = delfile or function() end
-local isfile = isfile or function() return false end
-
--- ==========================================
--- TEMA PROFISSIONAL EVOK
--- ==========================================
-local Theme = {
-	Background = Color3.fromRGB(12, 12, 14),
-	Container = Color3.fromRGB(18, 18, 20),
-	Element = Color3.fromRGB(24, 24, 28),
-	ElementHover = Color3.fromRGB(32, 32, 38),
-	Accent = Color3.fromRGB(138, 43, 226),    -- Roxo Evok
-	AccentDark = Color3.fromRGB(90, 20, 160),
-	Text = Color3.fromRGB(255, 255, 255),
-	TextMuted = Color3.fromRGB(140, 140, 150),
-	Outline = Color3.fromRGB(40, 40, 45)
-}
-
-local AnimInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-
--- ==========================================
--- UTILS (MATEMÁTICA, TWEEN E DRAG)
--- ==========================================
-local Utils = {}
-function Utils:Tween(obj, properties, time)
-	local tween = TweenService:Create(obj, TweenInfo.new(time or 0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), properties)
-	tween:Play()
-	return tween
+local function GetGuiParent()
+    if gethui then return gethui() end
+    if syn and syn.protect_gui then
+        local gui = Instance.new("ScreenGui")
+        syn.protect_gui(gui)
+        gui.Parent = CoreGui
+        return gui
+    end
+    return CoreGui
 end
 
-function Utils:MakeDraggable(Frame, Handle)
-	local dragging, dragInput, dragStart, startPos
-	Handle.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = true; dragStart = input.Position; startPos = Frame.Position
-			input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
-		end
-	end)
-	Handle.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
-	end)
-	UserInputService.InputChanged:Connect(function(input)
-		if input == dragInput and dragging then
-			local delta = input.Position - dragStart
-			Utils:Tween(Frame, {Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)}, 0.1)
-		end
-	end)
-end
-
--- ==========================================
--- SISTEMA DE CONFIGURAÇÕES (JSON SAVE/LOAD)
--- ==========================================
-function Evok:SaveConfig()
-	if not isfolder(Evok.Config.Folder) then makefolder(Evok.Config.Folder) end
-	local savedData = {}
-	for flag, data in pairs(Evok.Flags) do
-		savedData[flag] = data.Value
-	end
-	local json = HttpService:JSONEncode(savedData)
-	writefile(Evok.Config.Folder .. "/" .. Evok.Config.File, json)
-	print("[Evok] Configuração Salva com Sucesso.")
-end
-
-function Evok:LoadConfig()
-	local path = Evok.Config.Folder .. "/" .. Evok.Config.File
-	if not isfile(path) then return end
-	local data = readfile(path)
-	local success, decoded = pcall(function() return HttpService:JSONDecode(data) end)
-	if not success then return end
-	
-	for flag, value in pairs(decoded) do
-		if Evok.Flags[flag] then
-			Evok.Flags[flag]:Set(value)
-		end
-	end
-	print("[Evok] Configuração Carregada.")
-end
-
--- ==========================================
--- GUI SETUP & PROTEÇÃO
--- ==========================================
 local EvokGui = Instance.new("ScreenGui")
-EvokGui.Name = "Evok_V3"
+EvokGui.Name = HttpService:GenerateGUID(false)
 EvokGui.ResetOnSpawn = false
-EvokGui.Parent = gethui and gethui() or CoreGui
+EvokGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+EvokGui.Parent = GetGuiParent()
 
-local NotifyContainer = Instance.new("Frame", EvokGui)
-NotifyContainer.Size = UDim2.new(0, 300, 1, -40)
-NotifyContainer.Position = UDim2.new(1, -320, 0, 20)
-NotifyContainer.BackgroundTransparency = 1
-local NotifyLayout = Instance.new("UIListLayout", NotifyContainer)
-NotifyLayout.SortOrder = Enum.SortOrder.LayoutOrder
-NotifyLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-NotifyLayout.Padding = UDim.new(0, 10)
+-- ==========================================
+-- 2. FUNÇÕES UTILITÁRIAS (ENGINE)
+-- ==========================================
+local Utility = {}
 
-function Evok:Notify(title, text, time)
-	local Notif = Instance.new("Frame", NotifyContainer)
-	Notif.Size = UDim2.new(1, 0, 0, 70)
-	Notif.BackgroundColor3 = Theme.Container
-	Notif.BackgroundTransparency = 1
-	Instance.new("UICorner", Notif).CornerRadius = UDim.new(0, 6)
-	local Stroke = Instance.new("UIStroke", Notif)
-	Stroke.Color = Theme.Accent
-	Stroke.Transparency = 1
-	
-	local NTitle = Instance.new("TextLabel", Notif)
-	NTitle.Size = UDim2.new(1, -20, 0, 25)
-	NTitle.Position = UDim2.new(0, 10, 0, 5)
-	NTitle.BackgroundTransparency = 1
-	NTitle.Text = title
-	NTitle.TextColor3 = Theme.Accent
-	NTitle.Font = Enum.Font.GothamBold
-	NTitle.TextSize = 14
-	NTitle.TextXAlignment = Enum.TextXAlignment.Left
-	NTitle.TextTransparency = 1
+function Utility:Create(class, properties)
+    local instance = Instance.new(class)
+    for i, v in pairs(properties) do
+        if i ~= "Parent" then instance[i] = v end
+    end
+    if properties.Parent then instance.Parent = properties.Parent end
+    return instance
+end
 
-	local NText = Instance.new("TextLabel", Notif)
-	NText.Size = UDim2.new(1, -20, 0, 30)
-	NText.Position = UDim2.new(0, 10, 0, 30)
-	NText.BackgroundTransparency = 1
-	NText.Text = text
-	NText.TextColor3 = Theme.TextMuted
-	NText.Font = Enum.Font.Gotham
-	NText.TextSize = 13
-	NText.TextXAlignment = Enum.TextXAlignment.Left
-	NText.TextWrapped = true
-	NText.TextTransparency = 1
+function Utility:MakeDraggable(Frame, Handle)
+    local dragging, dragInput, dragStart, startPos
+    Handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true; dragStart = input.Position; startPos = Frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    Handle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+end
 
-	Utils:Tween(Notif, {BackgroundTransparency = 0})
-	Utils:Tween(Stroke, {Transparency = 0.5})
-	Utils:Tween(NTitle, {TextTransparency = 0})
-	Utils:Tween(NText, {TextTransparency = 0})
-
-	task.delay(time or 3, function()
-		Utils:Tween(Notif, {BackgroundTransparency = 1})
-		Utils:Tween(Stroke, {Transparency = 1})
-		Utils:Tween(NTitle, {TextTransparency = 1})
-		Utils:Tween(NText, {TextTransparency = 1}).Completed:Connect(function() Notif:Destroy() end)
-	end)
+function Utility:GetTextBounds(text, font, size)
+    return TextService:GetTextSize(text, size, font, Vector2.new(10000, 10000))
 end
 
 -- ==========================================
--- CRIADOR DA JANELA
+-- 3. CRIAÇÃO DA JANELA PRINCIPAL
 -- ==========================================
 function Evok:Window(config)
-	local WindowName = config.Name or "Evok Hub"
-	
-	local Main = Instance.new("Frame", EvokGui)
-	Main.Size = UDim2.new(0, 650, 0, 420)
-	Main.Position = UDim2.new(0.5, -325, 0.5, -210)
-	Main.BackgroundColor3 = Theme.Background
-	Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
-	Instance.new("UIStroke", Main).Color = Theme.Accent
+    local WindowName = config.Name or "Evok Ultimate"
+    local WindowSize = config.Size or UDim2.new(0, 650, 0, 500)
 
-	local Header = Instance.new("Frame", Main)
-	Header.Size = UDim2.new(1, 0, 0, 40)
-	Header.BackgroundColor3 = Theme.Container
-	Header.BorderSizePixel = 0
-	Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 8)
-	
-	-- Corrige cantos vazando
-	local HeaderHide = Instance.new("Frame", Header)
-	HeaderHide.Size = UDim2.new(1, 0, 0, 10)
-	HeaderHide.Position = UDim2.new(0, 0, 1, -10)
-	HeaderHide.BackgroundColor3 = Theme.Container
-	HeaderHide.BorderSizePixel = 0
-	
-	Utils:MakeDraggable(Main, Header)
+    -- Fundo Principal
+    local Main = Utility:Create("Frame", {
+        Size = WindowSize,
+        Position = UDim2.new(0.5, -WindowSize.X.Offset/2, 0.5, -WindowSize.Y.Offset/2),
+        BackgroundColor3 = self.Theme.BackgroundColor,
+        BorderSizePixel = 1,
+        BorderColor3 = self.Theme.OutlineColor,
+        Parent = EvokGui
+    })
 
-	local Title = Instance.new("TextLabel", Header)
-	Title.Size = UDim2.new(1, -20, 1, 0)
-	Title.Position = UDim2.new(0, 15, 0, 0)
-	Title.BackgroundTransparency = 1
-	Title.Text = WindowName
-	Title.TextColor3 = Theme.Accent
-	Title.Font = Enum.Font.GothamBold
-	Title.TextSize = 15
-	Title.TextXAlignment = Enum.TextXAlignment.Left
+    local InnerBorder = Utility:Create("UIStroke", {
+        Color = self.Theme.WindowBorder,
+        Thickness = 1,
+        LineJoinMode = Enum.LineJoinMode.Miter,
+        Parent = Main
+    })
 
-	local Sidebar = Instance.new("Frame", Main)
-	Sidebar.Size = UDim2.new(0, 160, 1, -40)
-	Sidebar.Position = UDim2.new(0, 0, 0, 40)
-	Sidebar.BackgroundColor3 = Theme.Container
-	Sidebar.BorderSizePixel = 0
-	
-	local SideLine = Instance.new("Frame", Sidebar)
-	SideLine.Size = UDim2.new(0, 1, 1, 0)
-	SideLine.Position = UDim2.new(1, 0, 0, 0)
-	SideLine.BackgroundColor3 = Theme.Outline
-	SideLine.BorderSizePixel = 0
+    -- Header (Título no estilo da sua imagem)
+    local Header = Utility:Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 25),
+        BackgroundColor3 = self.Theme.BackgroundColor,
+        BorderSizePixel = 0,
+        Parent = Main
+    })
+    Utility:MakeDraggable(Main, Header)
 
-	local TabContainer = Instance.new("ScrollingFrame", Sidebar)
-	TabContainer.Size = UDim2.new(1, 0, 1, -10)
-	TabContainer.Position = UDim2.new(0, 0, 0, 5)
-	TabContainer.BackgroundTransparency = 1
-	TabContainer.ScrollBarThickness = 0
-	local TabUIList = Instance.new("UIListLayout", TabContainer)
-	TabUIList.Padding = UDim.new(0, 5)
-	TabUIList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    local TitleLabel = Utility:Create("TextLabel", {
+        Size = UDim2.new(1, -10, 1, 0),
+        Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1,
+        Text = WindowName,
+        TextColor3 = self.Theme.TextColor,
+        Font = Enum.Font.Code, -- Fonte mais "hacker" estilo a imagem
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        RichText = true,
+        Parent = Header
+    })
 
-	local ContentArea = Instance.new("Frame", Main)
-	ContentArea.Size = UDim2.new(1, -161, 1, -40)
-	ContentArea.Position = UDim2.new(0, 161, 0, 40)
-	ContentArea.BackgroundTransparency = 1
+    -- Container de Abas (Tabs)
+    local TabContainer = Utility:Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 30),
+        Position = UDim2.new(0, 0, 0, 25),
+        BackgroundColor3 = self.Theme.TabBackground,
+        BorderSizePixel = 1,
+        BorderColor3 = self.Theme.WindowBorder,
+        Parent = Main
+    })
 
-	local CurrentTab = nil
+    local TabList = Utility:Create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Parent = TabContainer
+    })
 
-	local WindowLogic = {}
+    -- Área onde as colunas vão ficar
+    local ContentContainer = Utility:Create("Frame", {
+        Size = UDim2.new(1, -20, 1, -65),
+        Position = UDim2.new(0, 10, 0, 60),
+        BackgroundTransparency = 1,
+        Parent = Main
+    })
 
-	-- ==========================================
-	-- SISTEMA DE ABAS (TABS)
-	-- ==========================================
-	function WindowLogic:Tab(nome)
-		local TabBtn = Instance.new("TextButton", TabContainer)
-		TabBtn.Size = UDim2.new(1, -16, 0, 35)
-		TabBtn.BackgroundTransparency = 1
-		TabBtn.Text = " " .. nome
-		TabBtn.TextColor3 = Theme.TextMuted
-		TabBtn.Font = Enum.Font.GothamMedium
-		TabBtn.TextSize = 14
-		TabBtn.TextXAlignment = Enum.TextXAlignment.Left
-		Instance.new("UICorner", TabBtn).CornerRadius = UDim.new(0, 6)
+    local WindowLogic = {
+        CurrentTab = nil
+    }
 
-		local TabContent = Instance.new("ScrollingFrame", ContentArea)
-		TabContent.Size = UDim2.new(1, -20, 1, -20)
-		TabContent.Position = UDim2.new(0, 10, 0, 10)
-		TabContent.BackgroundTransparency = 1
-		TabContent.ScrollBarThickness = 3
-		TabContent.ScrollBarImageColor3 = Theme.Accent
-		TabContent.Visible = false
-		local ContentUIList = Instance.new("UIListLayout", TabContent)
-		ContentUIList.Padding = UDim.new(0, 8)
+    -- ==========================================
+    -- 4. SISTEMA DE ABAS (TABS)
+    -- ==========================================
+    function WindowLogic:Tab(nome)
+        local TabSize = Utility:GetTextBounds(nome, Enum.Font.Code, 13).X + 20
 
-		TabBtn.MouseButton1Click:Connect(function()
-			if CurrentTab == TabBtn then return end
-			if CurrentTab then
-				Utils:Tween(CurrentTab, {BackgroundTransparency = 1, TextColor3 = Theme.TextMuted})
-				local oldContent = ContentArea:FindFirstChild(CurrentTab.Name .. "_Content")
-				if oldContent then oldContent.Visible = false end
-			end
-			CurrentTab = TabBtn
-			Utils:Tween(TabBtn, {BackgroundTransparency = 0, BackgroundColor3 = Theme.Element, TextColor3 = Theme.Accent})
-			TabContent.Name = TabBtn.Name .. "_Content"
-			TabContent.Visible = true
-		end)
+        local TabBtn = Utility:Create("TextButton", {
+            Size = UDim2.new(0, TabSize, 1, 0),
+            BackgroundTransparency = 1,
+            Text = nome,
+            TextColor3 = Evok.Theme.TextMuted,
+            Font = Enum.Font.Code,
+            TextSize = 13,
+            Parent = TabContainer
+        })
 
-		if #TabContainer:GetChildren() == 2 then
-			CurrentTab = TabBtn
-			TabBtn.BackgroundTransparency = 0
-			TabBtn.BackgroundColor3 = Theme.Element
-			TabBtn.TextColor3 = Theme.Accent
-			TabContent.Name = TabBtn.Name .. "_Content"
-			TabContent.Visible = true
-		end
+        local TabLine = Utility:Create("Frame", {
+            Size = UDim2.new(1, 0, 0, 2),
+            Position = UDim2.new(0, 0, 1, -2),
+            BackgroundColor3 = Evok.Theme.AccentColor,
+            BorderSizePixel = 0,
+            Visible = false,
+            Parent = TabBtn
+        })
 
-		local Elements = {}
+        local TabContent = Utility:Create("Frame", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Visible = false,
+            Parent = ContentContainer
+        })
 
-		-- ==========================================
-		-- COMPONENTES DA UI (BOTÃO, TOGGLE, SLIDER)
-		-- ==========================================
-		function Elements:Button(cfg)
-			local Btn = Instance.new("TextButton", TabContent)
-			Btn.Size = UDim2.new(1, -10, 0, 42)
-			Btn.BackgroundColor3 = Theme.Element
-			Btn.Text = "   " .. cfg.Name
-			Btn.TextColor3 = Theme.Text
-			Btn.Font = Enum.Font.GothamMedium
-			Btn.TextSize = 14
-			Btn.TextXAlignment = Enum.TextXAlignment.Left
-			Btn.AutoButtonColor = false
-			Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 6)
-			Instance.new("UIStroke", Btn).Color = Theme.Outline
+        -- Layout de Colunas (Esquerda e Direita) idêntico à sua foto
+        local LeftColumn = Utility:Create("ScrollingFrame", {
+            Size = UDim2.new(0.5, -5, 1, 0),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1,
+            ScrollBarThickness = 0,
+            Parent = TabContent
+        })
+        local RightColumn = Utility:Create("ScrollingFrame", {
+            Size = UDim2.new(0.5, -5, 1, 0),
+            Position = UDim2.new(0.5, 5, 0, 0),
+            BackgroundTransparency = 1,
+            ScrollBarThickness = 0,
+            Parent = TabContent
+        })
 
-			Btn.MouseButton1Click:Connect(function()
-				Utils:Tween(Btn, {BackgroundColor3 = Theme.ElementHover}, 0.1)
-				task.wait(0.1)
-				Utils:Tween(Btn, {BackgroundColor3 = Theme.Element}, 0.1)
-				if cfg.Callback then cfg.Callback() end
-			end)
-		end
+        Utility:Create("UIListLayout", {Padding = UDim.new(0, 10), Parent = LeftColumn})
+        Utility:Create("UIListLayout", {Padding = UDim.new(0, 10), Parent = RightColumn})
 
-		function Elements:Toggle(cfg)
-			local flag = cfg.Flag or cfg.Name
-			local state = cfg.Default or false
-			
-			local Tgl = Instance.new("TextButton", TabContent)
-			Tgl.Size = UDim2.new(1, -10, 0, 42)
-			Tgl.BackgroundColor3 = Theme.Element
-			Tgl.Text = "   " .. cfg.Name
-			Tgl.TextColor3 = Theme.Text
-			Tgl.Font = Enum.Font.GothamMedium
-			Tgl.TextSize = 14
-			Tgl.TextXAlignment = Enum.TextXAlignment.Left
-			Tgl.AutoButtonColor = false
-			Instance.new("UICorner", Tgl).CornerRadius = UDim.new(0, 6)
-			Instance.new("UIStroke", Tgl).Color = Theme.Outline
+        TabBtn.MouseButton1Click:Connect(function()
+            if WindowLogic.CurrentTab == TabBtn then return end
+            if WindowLogic.CurrentTab then
+                WindowLogic.CurrentTab.TextColor3 = Evok.Theme.TextMuted
+                WindowLogic.CurrentTab.Frame.Visible = false
+                ContentContainer[WindowLogic.CurrentTab.Name .. "_Content"].Visible = false
+            end
+            WindowLogic.CurrentTab = TabBtn
+            TabBtn.TextColor3 = Evok.Theme.TextColor
+            TabLine.Visible = true
+            TabContent.Name = TabBtn.Name .. "_Content"
+            TabContent.Visible = true
+        end)
 
-			local Box = Instance.new("Frame", Tgl)
-			Box.Size = UDim2.new(0, 40, 0, 20)
-			Box.Position = UDim2.new(1, -55, 0.5, -10)
-			Box.BackgroundColor3 = state and Theme.Accent or Theme.Background
-			Instance.new("UICorner", Box).CornerRadius = UDim.new(1, 0)
-			local BoxStroke = Instance.new("UIStroke", Box)
-			BoxStroke.Color = Theme.Outline
+        if #TabContainer:GetChildren() == 2 then -- Ativa a primeira aba
+            WindowLogic.CurrentTab = TabBtn
+            TabBtn.TextColor3 = Evok.Theme.TextColor
+            TabLine.Visible = true
+            TabContent.Name = TabBtn.Name .. "_Content"
+            TabContent.Visible = true
+        end
 
-			local Dot = Instance.new("Frame", Box)
-			Dot.Size = UDim2.new(0, 16, 0, 16)
-			Dot.Position = state and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-			Dot.BackgroundColor3 = Theme.Text
-			Instance.new("UICorner", Dot).CornerRadius = UDim.new(1, 0)
+        local TabLogic = {}
 
-			local function Fire()
-				state = not state
-				Utils:Tween(Box, {BackgroundColor3 = state and Theme.Accent or Theme.Background})
-				Utils:Tween(Dot, {Position = state and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)})
-				if Evok.Flags[flag] then Evok.Flags[flag].Value = state end
-				if cfg.Callback then cfg.Callback(state) end
-			end
+        -- ==========================================
+        -- 5. CRIAÇÃO DE GROUPBOXES (SEÇÕES)
+        -- ==========================================
+        function TabLogic:Groupbox(config)
+            local gbName = config.Name or "Groupbox"
+            local gbSide = config.Side or "Left" -- Left ou Right
+            
+            local TargetColumn = gbSide == "Left" and LeftColumn or RightColumn
 
-			Tgl.MouseButton1Click:Connect(Fire)
+            local GroupboxFrame = Utility:Create("Frame", {
+                Size = UDim2.new(1, 0, 0, 20), -- Altura auto-ajustável depois
+                BackgroundColor3 = Evok.Theme.GroupboxBackground,
+                BorderColor3 = Evok.Theme.OutlineColor,
+                BorderSizePixel = 1,
+                Parent = TargetColumn
+            })
 
-			Evok.Flags[flag] = {
-				Value = state,
-				Set = function(self, val)
-					if state ~= val then Fire() end
-				end
-			}
-			if state and cfg.Callback then cfg.Callback(state) end
-		end
+            local GroupInnerBorder = Utility:Create("UIStroke", {
+                Color = Evok.Theme.GroupboxBorder,
+                Thickness = 1,
+                LineJoinMode = Enum.LineJoinMode.Miter,
+                Parent = GroupboxFrame
+            })
 
-		function Elements:Slider(cfg)
-			local flag = cfg.Flag or cfg.Name
-			local min = cfg.Min or 0
-			local max = cfg.Max or 100
-			local val = cfg.Default or min
-			
-			local Sld = Instance.new("Frame", TabContent)
-			Sld.Size = UDim2.new(1, -10, 0, 60)
-			Sld.BackgroundColor3 = Theme.Element
-			Instance.new("UICorner", Sld).CornerRadius = UDim.new(0, 6)
-			Instance.new("UIStroke", Sld).Color = Theme.Outline
+            local GroupTitle = Utility:Create("TextLabel", {
+                Size = UDim2.new(1, -10, 0, 20),
+                Position = UDim2.new(0, 10, 0, -10),
+                BackgroundColor3 = Evok.Theme.BackgroundColor, -- Fundo para "cortar" a linha
+                Text = " " .. gbName .. " ",
+                TextColor3 = Evok.Theme.TextColor,
+                Font = Enum.Font.Code,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = GroupboxFrame
+            })
+            GroupTitle.Size = UDim2.new(0, Utility:GetTextBounds(GroupTitle.Text, Enum.Font.Code, 13).X, 0, 20)
 
-			local Title = Instance.new("TextLabel", Sld)
-			Title.Size = UDim2.new(1, -20, 0, 30)
-			Title.Position = UDim2.new(0, 15, 0, 5)
-			Title.BackgroundTransparency = 1
-			Title.Text = cfg.Name
-			Title.TextColor3 = Theme.Text
-			Title.Font = Enum.Font.GothamMedium
-			Title.TextSize = 14
-			Title.TextXAlignment = Enum.TextXAlignment.Left
+            local GroupContainer = Utility:Create("Frame", {
+                Size = UDim2.new(1, -16, 1, -20),
+                Position = UDim2.new(0, 8, 0, 15),
+                BackgroundTransparency = 1,
+                Parent = GroupboxFrame
+            })
 
-			local ValTxt = Instance.new("TextLabel", Sld)
-			ValTxt.Size = UDim2.new(0, 50, 0, 30)
-			ValTxt.Position = UDim2.new(1, -65, 0, 5)
-			ValTxt.BackgroundTransparency = 1
-			ValTxt.Text = tostring(val)
-			ValTxt.TextColor3 = Theme.Accent
-			ValTxt.Font = Enum.Font.GothamBold
-			ValTxt.TextSize = 14
-			ValTxt.TextXAlignment = Enum.TextXAlignment.Right
+            local GroupLayout = Utility:Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 5),
+                Parent = GroupContainer
+            })
 
-			local Track = Instance.new("TextButton", Sld)
-			Track.Size = UDim2.new(1, -30, 0, 6)
-			Track.Position = UDim2.new(0, 15, 0, 40)
-			Track.BackgroundColor3 = Theme.Background
-			Track.Text = ""
-			Track.AutoButtonColor = false
-			Instance.new("UICorner", Track).CornerRadius = UDim.new(1, 0)
+            -- Auto-ajusta o tamanho do Groupbox com base nos elementos dentro
+            GroupLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+                GroupboxFrame.Size = UDim2.new(1, 0, 0, GroupLayout.AbsoluteContentSize.Y + 25)
+                TargetColumn.CanvasSize = UDim2.new(0, 0, 0, TargetColumn.UIListLayout.AbsoluteContentSize.Y + 10)
+            end)
 
-			local Fill = Instance.new("Frame", Track)
-			Fill.Size = UDim2.new((val - min) / (max - min), 0, 1, 0)
-			Fill.BackgroundColor3 = Theme.Accent
-			Instance.new("UICorner", Fill).CornerRadius = UDim.new(1, 0)
+            local Elements = {}
+            
+            -- [A PARTE 2 ENTRARÁ AQUI DENTRO (TOGGLES, SLIDERS INLINE)]
 
-			local dragging = false
-			local function update(input)
-				local pct = math.clamp((input.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
-				val = math.floor(min + ((max - min) * pct))
-				ValTxt.Text = tostring(val)
-				Utils:Tween(Fill, {Size = UDim2.new(pct, 0, 1, 0)}, 0.1)
-				if Evok.Flags[flag] then Evok.Flags[flag].Value = val end
-				if cfg.Callback then cfg.Callback(val) end
-			end
+            return Elements
+        end
 
-			Track.InputBegan:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true; update(input) end
-			end)
-			UserInputService.InputEnded:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-			end)
-			UserInputService.InputChanged:Connect(function(input)
-				if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then update(input) end
-			end)
+        return TabLogic
+    end
 
-			Evok.Flags[flag] = {
-				Value = val,
-				Set = function(self, newVal)
-					val = math.clamp(newVal, min, max)
-					ValTxt.Text = tostring(val)
-					Utils:Tween(Fill, {Size = UDim2.new((val - min) / (max - min), 0, 1, 0)}, 0.1)
-					if cfg.Callback then cfg.Callback(val) end
-				end
-			}
-		end
-
-		-- ==========================================
-		-- ELEMENTO AVANÇADO: DROPDOWN COM SEARCH
-		-- ==========================================
-		function Elements:Dropdown(cfg)
-			local flag = cfg.Flag or cfg.Name
-			local options = cfg.Options or {}
-			local selected = cfg.Default or options[1] or ""
-			local isOpen = false
-
-			local DropFrame = Instance.new("Frame", TabContent)
-			DropFrame.Size = UDim2.new(1, -10, 0, 42)
-			DropFrame.BackgroundColor3 = Theme.Element
-			DropFrame.ClipsDescendants = true
-			Instance.new("UICorner", DropFrame).CornerRadius = UDim.new(0, 6)
-			Instance.new("UIStroke", DropFrame).Color = Theme.Outline
-
-			local MainBtn = Instance.new("TextButton", DropFrame)
-			MainBtn.Size = UDim2.new(1, 0, 0, 42)
-			MainBtn.BackgroundTransparency = 1
-			MainBtn.Text = "   " .. cfg.Name .. " : " .. selected
-			MainBtn.TextColor3 = Theme.Text
-			MainBtn.Font = Enum.Font.GothamMedium
-			MainBtn.TextSize = 14
-			MainBtn.TextXAlignment = Enum.TextXAlignment.Left
-
-			local Icon = Instance.new("TextLabel", DropFrame)
-			Icon.Size = UDim2.new(0, 20, 0, 20)
-			Icon.Position = UDim2.new(1, -30, 0, 11)
-			Icon.BackgroundTransparency = 1
-			Icon.Text = "+"
-			Icon.TextColor3 = Theme.Accent
-			Icon.Font = Enum.Font.GothamBold
-			Icon.TextSize = 16
-
-			local SearchBox = Instance.new("TextBox", DropFrame)
-			SearchBox.Size = UDim2.new(1, -20, 0, 30)
-			SearchBox.Position = UDim2.new(0, 10, 0, 45)
-			SearchBox.BackgroundColor3 = Theme.Background
-			SearchBox.PlaceholderText = "Pesquisar..."
-			SearchBox.Text = ""
-			SearchBox.TextColor3 = Theme.Text
-			SearchBox.Font = Enum.Font.Gotham
-			SearchBox.TextSize = 13
-			Instance.new("UICorner", SearchBox).CornerRadius = UDim.new(0, 4)
-			Instance.new("UIStroke", SearchBox).Color = Theme.Outline
-
-			local ScrollOpts = Instance.new("ScrollingFrame", DropFrame)
-			ScrollOpts.Size = UDim2.new(1, -20, 1, -85)
-			ScrollOpts.Position = UDim2.new(0, 10, 0, 80)
-			ScrollOpts.BackgroundTransparency = 1
-			ScrollOpts.ScrollBarThickness = 2
-			local ListLayout = Instance.new("UIListLayout", ScrollOpts)
-			ListLayout.Padding = UDim.new(0, 4)
-
-			local function RefreshOptions(filter)
-				for _, child in pairs(ScrollOpts:GetChildren()) do
-					if child:IsA("TextButton") then child:Destroy() end
-				end
-				local count = 0
-				for _, opt in pairs(options) do
-					if filter == "" or string.find(string.lower(opt), string.lower(filter)) then
-						count = count + 1
-						local OptBtn = Instance.new("TextButton", ScrollOpts)
-						OptBtn.Size = UDim2.new(1, 0, 0, 25)
-						OptBtn.BackgroundColor3 = selected == opt and Theme.Accent or Theme.Background
-						OptBtn.Text = opt
-						OptBtn.TextColor3 = selected == opt and Theme.Text or Theme.TextMuted
-						OptBtn.Font = Enum.Font.Gotham
-						OptBtn.TextSize = 13
-						OptBtn.AutoButtonColor = false
-						Instance.new("UICorner", OptBtn).CornerRadius = UDim.new(0, 4)
-						
-						OptBtn.MouseButton1Click:Connect(function()
-							selected = opt
-							MainBtn.Text = "   " .. cfg.Name .. " : " .. selected
-							if Evok.Flags[flag] then Evok.Flags[flag].Value = selected end
-							if cfg.Callback then cfg.Callback(selected) end
-							isOpen = false
-							Utils:Tween(DropFrame, {Size = UDim2.new(1, -10, 0, 42)})
-							Icon.Text = "+"
-							RefreshOptions("") -- Reset colors
-						end)
-					end
-				end
-				ScrollOpts.CanvasSize = UDim2.new(0, 0, 0, count * 29)
-			end
-
-			MainBtn.MouseButton1Click:Connect(function()
-				isOpen = not isOpen
-				Utils:Tween(DropFrame, {Size = isOpen and UDim2.new(1, -10, 0, 180) or UDim2.new(1, -10, 0, 42)})
-				Icon.Text = isOpen and "-" or "+"
-				if isOpen then RefreshOptions("") end
-			end)
-
-			SearchBox.Changed:Connect(function(prop)
-				if prop == "Text" then RefreshOptions(SearchBox.Text) end
-			end)
-
-			Evok.Flags[flag] = {
-				Value = selected,
-				Set = function(self, val)
-					selected = val
-					MainBtn.Text = "   " .. cfg.Name .. " : " .. selected
-					if cfg.Callback then cfg.Callback(selected) end
-				end
-			}
-		end
-
-		return Elements
-	end
-
-	return WindowLogic
+    return WindowLogic
 end
 
 return Evok
