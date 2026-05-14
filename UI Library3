@@ -57,7 +57,7 @@ end
 
 function Evok:Window(config)
     local Main = Instance.new("Frame", EvokGui)
-    Main.Size = UDim2.new(0, 550, 0, 800) -- TAMANHO EXATO PEDIDO
+    Main.Size = UDim2.new(0, 450, 0, 900) -- TAMANHO EXATO PEDIDO
     Main.Position = UDim2.new(0.5, -400, 0.5, -275)
     Main.BackgroundColor3 = self.Theme.Background
     Main.BorderColor3 = self.Theme.Border
