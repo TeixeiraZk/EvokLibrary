@@ -1,0 +1,494 @@
+--[[
+ ___________    ____  ______    __  ___ 
+|   ____\   \  /   / /  __  \  |  |/  / 
+|  |__   \   \/   / |  |  |  | |  '  /  
+|   __|   \      /  |  |  |  | |    <   
+|  |____   \    /   |  `--'  | |  .  \  
+|_______|   \__/     \______/  |__|\__\ 
+                                 
+        E V O K   U I   L I B R A R Y
+          ABSOLUTE EDITION V2.0
+--]]
+
+local Evok = {}
+
+-- ==========================================
+-- SERVIÇOS DO ROBLOX
+-- ==========================================
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+local TextService = game:GetService("TextService")
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- ==========================================
+-- TEMA DA EVOK E VARIÁVEIS GLOBAIS
+-- ==========================================
+local Theme = {
+	Background = Color3.fromRGB(12, 12, 14),
+	Container = Color3.fromRGB(18, 18, 20),
+	Element = Color3.fromRGB(25, 25, 28),
+	ElementHover = Color3.fromRGB(35, 35, 40),
+	Accent = Color3.fromRGB(138, 43, 226),    -- Blue Violet / Roxo Evok
+	AccentDark = Color3.fromRGB(90, 20, 160),
+	Text = Color3.fromRGB(255, 255, 255),
+	TextMuted = Color3.fromRGB(140, 140, 150),
+	Outline = Color3.fromRGB(40, 40, 45),
+	Risk = Color3.fromRGB(255, 65, 65),       -- Vermelho para erros
+	Safe = Color3.fromRGB(65, 255, 100)       -- Verde para sucesso
+}
+
+local EvokSettings = {
+	WatermarkEnabled = false,
+	MenuBind = Enum.KeyCode.RightShift,
+	Toggled = true
+}
+
+local AnimInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local FastAnim = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+-- Proteção de GUI (Bypass Anti-Cheat visual)
+local function GetGuiParent()
+	if gethui then return gethui() end
+	if syn and syn.protect_gui then
+		local gui = Instance.new("ScreenGui")
+		syn.protect_gui(gui)
+		gui.Parent = CoreGui
+		return gui
+	end
+	local success, result = pcall(function() return CoreGui end)
+	if success and result then return result end
+	return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local EvokGui = Instance.new("ScreenGui")
+EvokGui.Name = HttpService:GenerateGUID(false)
+EvokGui.ResetOnSpawn = false
+EvokGui.Parent = GetGuiParent()
+
+-- ==========================================
+-- UTILITÁRIOS DE MATEMÁTICA E CORES
+-- ==========================================
+local Utility = {}
+function Utility:Tween(obj, properties, duration, style, direction)
+	style = style or Enum.EasingStyle.Quint
+	direction = direction or Enum.EasingDirection.Out
+	duration = duration or 0.3
+	local tween = TweenService:Create(obj, TweenInfo.new(duration, style, direction), properties)
+	tween:Play()
+	return tween
+end
+
+function Utility:MakeDraggable(Frame, Handle)
+	local dragging, dragInput, dragStart, startPos
+	Handle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragStart = input.Position
+			startPos = Frame.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	Handle.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if input == dragInput and dragging then
+			local delta = input.Position - dragStart
+			Utility:Tween(Frame, {Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)}, 0.1)
+		end
+	end)
+end
+
+function Utility:RGBToHSV(color)
+	local r, g, b = color.R, color.G, color.B
+	local max, min = math.max(r, g, b), math.min(r, g, b)
+	local h, s, v
+	v = max
+	local d = max - min
+	s = max == 0 and 0 or d / max
+	if max == min then h = 0 else
+		if max == r then h = (g - b) / d + (g < b and 6 or 0)
+		elseif max == g then h = (b - r) / d + 2
+		elseif max == b then h = (r - g) / d + 4 end
+		h = h / 6
+	end
+	return h, s, v
+end
+
+-- ==========================================
+-- SISTEMA DE NOTIFICAÇÕES & WATERMARK
+-- ==========================================
+local NotifyContainer = Instance.new("Frame", EvokGui)
+NotifyContainer.Size = UDim2.new(0, 320, 1, -40)
+NotifyContainer.Position = UDim2.new(1, -340, 0, 20)
+NotifyContainer.BackgroundTransparency = 1
+local NotifyLayout = Instance.new("UIListLayout", NotifyContainer)
+NotifyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+NotifyLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+NotifyLayout.Padding = UDim.new(0, 10)
+
+function Evok:Notify(config)
+	local title = config.Title or "Evok Info"
+	local content = config.Content or ""
+	local duration = config.Duration or 5
+	local type = config.Type or "Info" -- Info, Warning, Error
+
+	local NotifColor = Theme.Accent
+	if type == "Warning" then NotifColor = Color3.fromRGB(255, 170, 0)
+	elseif type == "Error" then NotifColor = Theme.Risk end
+
+	local Notif = Instance.new("Frame", NotifyContainer)
+	Notif.Size = UDim2.new(1, 0, 0, 75)
+	Notif.BackgroundColor3 = Theme.Container
+	Notif.BackgroundTransparency = 1
+	Instance.new("UICorner", Notif).CornerRadius = UDim.new(0, 6)
+	
+	local NStroke = Instance.new("UIStroke", Notif)
+	NStroke.Color = NotifColor
+	NStroke.Thickness = 1
+	NStroke.Transparency = 1
+
+	local NTitle = Instance.new("TextLabel", Notif)
+	NTitle.Size = UDim2.new(1, -30, 0, 25)
+	NTitle.Position = UDim2.new(0, 15, 0, 10)
+	NTitle.BackgroundTransparency = 1
+	NTitle.Text = title
+	NTitle.TextColor3 = NotifColor
+	NTitle.Font = Enum.Font.GothamBold
+	NTitle.TextSize = 14
+	NTitle.TextXAlignment = Enum.TextXAlignment.Left
+	NTitle.TextTransparency = 1
+
+	local NDesc = Instance.new("TextLabel", Notif)
+	NDesc.Size = UDim2.new(1, -30, 0, 30)
+	NDesc.Position = UDim2.new(0, 15, 0, 35)
+	NDesc.BackgroundTransparency = 1
+	NDesc.Text = content
+	NDesc.TextColor3 = Theme.TextMuted
+	NDesc.Font = Enum.Font.Gotham
+	NDesc.TextSize = 13
+	NDesc.TextXAlignment = Enum.TextXAlignment.Left
+	NDesc.TextWrapped = true
+	NDesc.TextTransparency = 1
+
+	Utility:Tween(Notif, {BackgroundTransparency = 0})
+	Utility:Tween(NStroke, {Transparency = 0.5})
+	Utility:Tween(NTitle, {TextTransparency = 0})
+	Utility:Tween(NDesc, {TextTransparency = 0})
+
+	task.delay(duration, function()
+		Utility:Tween(Notif, {BackgroundTransparency = 1})
+		Utility:Tween(NStroke, {Transparency = 1})
+		Utility:Tween(NTitle, {TextTransparency = 1})
+		local fade = Utility:Tween(NDesc, {TextTransparency = 1})
+		fade.Completed:Connect(function() Notif:Destroy() end)
+	end)
+end
+
+function Evok:SetWatermark(text)
+	if not EvokGui:FindFirstChild("Watermark") then
+		local WM = Instance.new("Frame", EvokGui)
+		WM.Name = "Watermark"
+		WM.Size = UDim2.new(0, 200, 0, 30)
+		WM.Position = UDim2.new(0, 20, 0, 20)
+		WM.BackgroundColor3 = Theme.Container
+		Instance.new("UICorner", WM).CornerRadius = UDim.new(0, 6)
+		Instance.new("UIStroke", WM).Color = Theme.Accent
+
+		local WMText = Instance.new("TextLabel", WM)
+		WMText.Name = "Label"
+		WMText.Size = UDim2.new(1, -20, 1, 0)
+		WMText.Position = UDim2.new(0, 10, 0, 0)
+		WMText.BackgroundTransparency = 1
+		WMText.TextColor3 = Theme.Text
+		WMText.Font = Enum.Font.GothamMedium
+		WMText.TextSize = 13
+		WMText.TextXAlignment = Enum.TextXAlignment.Left
+	end
+	
+	local lbl = EvokGui.Watermark.Label
+	lbl.Text = text
+	local bounds = TextService:GetTextSize(text, 13, Enum.Font.GothamMedium, Vector2.new(1000, 30))
+	EvokGui.Watermark.Size = UDim2.new(0, bounds.X + 20, 0, 30)
+end
+
+-- ==========================================
+-- CRIANDO A JANELA PRINCIPAL
+-- ==========================================
+function Evok:CreateWindow(config)
+	local WindowName = config.Name or "Evok UI"
+	
+	local MainFrame = Instance.new("Frame", EvokGui)
+	MainFrame.Name = "MainFrame"
+	MainFrame.Size = UDim2.new(0, 650, 0, 450)
+	MainFrame.Position = UDim2.new(0.5, -325, 0.5, -225)
+	MainFrame.BackgroundColor3 = Theme.Background
+	MainFrame.BorderSizePixel = 0
+	MainFrame.ClipsDescendants = true
+	Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+
+	local MainStroke = Instance.new("UIStroke", MainFrame)
+	MainStroke.Color = Theme.Accent
+	MainStroke.Thickness = 2
+	MainStroke.Transparency = 0.2
+
+	-- HEADER & ARRASTO
+	local Header = Instance.new("Frame", MainFrame)
+	Header.Size = UDim2.new(1, 0, 0, 45)
+	Header.BackgroundColor3 = Theme.Container
+	Header.BorderSizePixel = 0
+	Utility:MakeDraggable(MainFrame, Header)
+	
+	local HeaderLine = Instance.new("Frame", Header)
+	HeaderLine.Size = UDim2.new(1, 0, 0, 1)
+	HeaderLine.Position = UDim2.new(0, 0, 1, 0)
+	HeaderLine.BackgroundColor3 = Theme.Outline
+	HeaderLine.BorderSizePixel = 0
+
+	local Title = Instance.new("TextLabel", Header)
+	Title.Size = UDim2.new(1, -30, 1, 0)
+	Title.Position = UDim2.new(0, 20, 0, 0)
+	Title.BackgroundTransparency = 1
+	Title.Text = WindowName
+	Title.TextColor3 = Theme.Text
+	Title.Font = Enum.Font.GothamBold
+	Title.TextSize = 16
+	Title.TextXAlignment = Enum.TextXAlignment.Left
+
+	-- Lógica de Esconder/Mostrar Menu (Keybind Global)
+	UserInputService.InputBegan:Connect(function(input, proc)
+		if not proc and input.KeyCode == EvokSettings.MenuBind then
+			EvokSettings.Toggled = not EvokSettings.Toggled
+			MainFrame.Visible = EvokSettings.Toggled
+		end
+	end)
+
+	-- SISTEMA DE ABAS (ESQUERDA)
+	local Sidebar = Instance.new("Frame", MainFrame)
+	Sidebar.Size = UDim2.new(0, 160, 1, -46)
+	Sidebar.Position = UDim2.new(0, 0, 0, 46)
+	Sidebar.BackgroundColor3 = Theme.Container
+	Sidebar.BorderSizePixel = 0
+
+	local SidebarLine = Instance.new("Frame", Sidebar)
+	SidebarLine.Size = UDim2.new(0, 1, 1, 0)
+	SidebarLine.Position = UDim2.new(1, 0, 0, 0)
+	SidebarLine.BackgroundColor3 = Theme.Outline
+	SidebarLine.BorderSizePixel = 0
+
+	local TabContainer = Instance.new("ScrollingFrame", Sidebar)
+	TabContainer.Size = UDim2.new(1, 0, 1, -20)
+	TabContainer.Position = UDim2.new(0, 0, 0, 10)
+	TabContainer.BackgroundTransparency = 1
+	TabContainer.ScrollBarThickness = 0
+	
+	local TabListLayout = Instance.new("UIListLayout", TabContainer)
+	TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	TabListLayout.Padding = UDim.new(0, 5)
+	TabListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+	-- ÁREA DE CONTEÚDO (DIREITA)
+	local ContentArea = Instance.new("Frame", MainFrame)
+	ContentArea.Size = UDim2.new(1, -161, 1, -46)
+	ContentArea.Position = UDim2.new(0, 161, 0, 46)
+	ContentArea.BackgroundTransparency = 1
+
+	local windowLogic = { CurrentTab = nil }
+
+	-- ==========================================
+	-- CONSTRUTOR DE ABAS
+	-- ==========================================
+	function windowLogic:CreateTab(tabName)
+		local TabBtn = Instance.new("TextButton", TabContainer)
+		TabBtn.Size = UDim2.new(1, -20, 0, 35)
+		TabBtn.BackgroundColor3 = Theme.Element
+		TabBtn.BackgroundTransparency = 1
+		TabBtn.Text = "  " .. tabName
+		TabBtn.TextColor3 = Theme.TextMuted
+		TabBtn.Font = Enum.Font.GothamMedium
+		TabBtn.TextSize = 14
+		TabBtn.TextXAlignment = Enum.TextXAlignment.Left
+		TabBtn.AutoButtonColor = false
+		Instance.new("UICorner", TabBtn).CornerRadius = UDim.new(0, 6)
+
+		local TabScroll = Instance.new("ScrollingFrame", ContentArea)
+		TabScroll.Size = UDim2.new(1, -30, 1, -30)
+		TabScroll.Position = UDim2.new(0, 15, 0, 15)
+		TabScroll.BackgroundTransparency = 1
+		TabScroll.ScrollBarThickness = 4
+		TabScroll.ScrollBarImageColor3 = Theme.Accent
+		TabScroll.Visible = false
+		
+		local ContentLayout = Instance.new("UIListLayout", TabScroll)
+		ContentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		ContentLayout.Padding = UDim.new(0, 10)
+
+		TabBtn.MouseButton1Click:Connect(function()
+			if windowLogic.CurrentTab == TabBtn then return end
+			if windowLogic.CurrentTab then
+				Utility:Tween(windowLogic.CurrentTab, {BackgroundTransparency = 1, TextColor3 = Theme.TextMuted})
+				local oldContent = ContentArea:FindFirstChild(windowLogic.CurrentTab.Text:sub(3) .. "_Content")
+				if oldContent then oldContent.Visible = false end
+			end
+			windowLogic.CurrentTab = TabBtn
+			Utility:Tween(TabBtn, {BackgroundTransparency = 0, TextColor3 = Theme.Accent})
+			TabScroll.Name = tabName .. "_Content"
+			TabScroll.Visible = true
+		end)
+
+		if #TabContainer:GetChildren() == 2 then
+			windowLogic.CurrentTab = TabBtn
+			TabBtn.BackgroundTransparency = 0
+			TabBtn.TextColor3 = Theme.Accent
+			TabScroll.Name = tabName .. "_Content"
+			TabScroll.Visible = true
+		end
+
+		local tabElements = {}
+
+		-- Elemento: Seção
+		function tabElements:CreateSection(nome)
+			local Section = Instance.new("TextLabel", TabScroll)
+			Section.Size = UDim2.new(1, 0, 0, 30)
+			Section.BackgroundTransparency = 1
+			Section.Text = nome
+			Section.TextColor3 = Theme.Accent
+			Section.Font = Enum.Font.GothamBold
+			Section.TextSize = 13
+			Section.TextXAlignment = Enum.TextXAlignment.Left
+			
+			local Line = Instance.new("Frame", Section)
+			Line.Size = UDim2.new(1, 0, 0, 1)
+			Line.Position = UDim2.new(0, 0, 1, -5)
+			Line.BackgroundColor3 = Theme.Outline
+			Line.BorderSizePixel = 0
+		end
+
+		-- Elemento: TextBox (Input de Texto)
+		function tabElements:CreateInput(config)
+			local text = config.Name or "Input"
+			local placeholder = config.Placeholder or "Digite aqui..."
+			local callback = config.Callback or function() end
+
+			local InputFrame = Instance.new("Frame", TabScroll)
+			InputFrame.Size = UDim2.new(1, -10, 0, 45)
+			InputFrame.BackgroundColor3 = Theme.Element
+			Instance.new("UICorner", InputFrame).CornerRadius = UDim.new(0, 6)
+			Instance.new("UIStroke", InputFrame).Color = Theme.Outline
+
+			local Title = Instance.new("TextLabel", InputFrame)
+			Title.Size = UDim2.new(0.5, -20, 1, 0)
+			Title.Position = UDim2.new(0, 15, 0, 0)
+			Title.BackgroundTransparency = 1
+			Title.Text = text
+			Title.TextColor3 = Theme.Text
+			Title.Font = Enum.Font.GothamMedium
+			Title.TextSize = 14
+			Title.TextXAlignment = Enum.TextXAlignment.Left
+
+			local TextBox = Instance.new("TextBox", InputFrame)
+			TextBox.Size = UDim2.new(0.5, -15, 0, 30)
+			TextBox.Position = UDim2.new(0.5, 0, 0.5, -15)
+			TextBox.BackgroundColor3 = Theme.Container
+			TextBox.PlaceholderText = placeholder
+			TextBox.Text = ""
+			TextBox.TextColor3 = Theme.Text
+			TextBox.Font = Enum.Font.Gotham
+			TextBox.TextSize = 13
+			TextBox.ClearTextOnFocus = false
+			Instance.new("UICorner", TextBox).CornerRadius = UDim.new(0, 4)
+			Instance.new("UIStroke", TextBox).Color = Theme.Outline
+
+			TextBox.FocusLost:Connect(function()
+				callback(TextBox.Text)
+			end)
+		end
+
+		-- Elemento: Toggle
+		function tabElements:CreateToggle(config)
+			local text = config.Name or "Toggle"
+			local toggled = config.Default or false
+			local callback = config.Callback or function() end
+
+			local TglBtn = Instance.new("TextButton", TabScroll)
+			TglBtn.Size = UDim2.new(1, -10, 0, 45)
+			TglBtn.BackgroundColor3 = Theme.Element
+			TglBtn.Text = "   " .. text
+			TglBtn.TextColor3 = Theme.Text
+			TglBtn.Font = Enum.Font.GothamMedium
+			TglBtn.TextSize = 14
+			TglBtn.TextXAlignment = Enum.TextXAlignment.Left
+			TglBtn.AutoButtonColor = false
+			Instance.new("UICorner", TglBtn).CornerRadius = UDim.new(0, 6)
+			Instance.new("UIStroke", TglBtn).Color = Theme.Outline
+
+			local IndicatorBG = Instance.new("Frame", TglBtn)
+			IndicatorBG.Size = UDim2.new(0, 40, 0, 20)
+			IndicatorBG.Position = UDim2.new(1, -55, 0.5, -10)
+			IndicatorBG.BackgroundColor3 = toggled and Theme.Accent or Theme.Background
+			Instance.new("UICorner", IndicatorBG).CornerRadius = UDim.new(1, 0)
+			local TglStroke = Instance.new("UIStroke", IndicatorBG)
+			TglStroke.Color = Theme.Outline
+
+			local Indicator = Instance.new("Frame", IndicatorBG)
+			Indicator.Size = UDim2.new(0, 16, 0, 16)
+			Indicator.Position = toggled and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+			Indicator.BackgroundColor3 = Theme.Text
+			Instance.new("UICorner", Indicator).CornerRadius = UDim.new(1, 0)
+
+			TglBtn.MouseButton1Click:Connect(function()
+				toggled = not toggled
+				Utility:Tween(IndicatorBG, {BackgroundColor3 = toggled and Theme.Accent or Theme.Background})
+				Utility:Tween(Indicator, {Position = toggled and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)})
+				callback(toggled)
+			end)
+			if toggled then callback(toggled) end
+		end
+
+		-- Elemento: ColorPicker (BÁSICO, POIS É COMPLEXO)
+		function tabElements:CreateColorPicker(config)
+			local text = config.Name or "Color Picker"
+			local color = config.Default or Color3.fromRGB(255, 255, 255)
+			local callback = config.Callback or function() end
+
+			local CPFrame = Instance.new("TextButton", TabScroll)
+			CPFrame.Size = UDim2.new(1, -10, 0, 45)
+			CPFrame.BackgroundColor3 = Theme.Element
+			CPFrame.Text = "   " .. text
+			CPFrame.TextColor3 = Theme.Text
+			CPFrame.Font = Enum.Font.GothamMedium
+			CPFrame.TextSize = 14
+			CPFrame.TextXAlignment = Enum.TextXAlignment.Left
+			CPFrame.AutoButtonColor = false
+			Instance.new("UICorner", CPFrame).CornerRadius = UDim.new(0, 6)
+			Instance.new("UIStroke", CPFrame).Color = Theme.Outline
+
+			local DisplayColor = Instance.new("Frame", CPFrame)
+			DisplayColor.Size = UDim2.new(0, 30, 0, 20)
+			DisplayColor.Position = UDim2.new(1, -45, 0.5, -10)
+			DisplayColor.BackgroundColor3 = color
+			Instance.new("UICorner", DisplayColor).CornerRadius = UDim.new(0, 4)
+			Instance.new("UIStroke", DisplayColor).Color = Theme.Outline
+
+			CPFrame.MouseButton1Click:Connect(function()
+				Evok:Notify({
+					Title = "Color Picker",
+					Content = "A interface avançada de ColorPicker está em construção na Evok V2.0!",
+					Type = "Warning"
+				})
+			end)
+		end
+
+		return tabElements
+	end
+
+	return windowLogic
+end
+
+return Evok
