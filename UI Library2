@@ -408,7 +408,7 @@ Evok.Themes = {
         Background = Color3.fromRGB(18, 18, 18),
         GroupboxBg = Color3.fromRGB(24, 24, 24),
         Border = Color3.fromRGB(40, 40, 40),
-        Accent = Color3.fromRGB(245, 160, 200),
+        Accent = Color3.fromRGB(138, 43, 226),
         Text = Color3.fromRGB(255, 255, 255),
         TextMuted = Color3.fromRGB(120, 120, 120),
         ElementBg = Color3.fromRGB(30, 30, 30),
@@ -980,6 +980,7 @@ function Evok:Window(config)
         BorderSizePixel = 1,
         Parent = EvokGui
     })
+       Utility:Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = Main })
 
     -- CORREÇÃO: BORDAS ARREDONDADAS DA UI PRINCIPAL
     Utility:Create("UICorner", {
@@ -1366,7 +1367,7 @@ function Evok:Window(config)
                     AutoButtonColor = false,
                     Parent = SldFrame
                 })
-
+                    Utility:Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = Track })
                 -- CORREÇÃO: ARREDONDAR TRACK DO SLIDER
                 Utility:Create("UICorner", {
                     CornerRadius = UDim.new(0, 4),
@@ -1382,6 +1383,7 @@ function Evok:Window(config)
                     BorderSizePixel = 0,
                     Parent = SldTrack
                 })
+                    Utility:Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = Fill })
 
                 -- CORREÇÃO: ARREDONDAR FILL DO SLIDER
                 Utility:Create("UICorner", {
