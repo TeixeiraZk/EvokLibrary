@@ -1,5 +1,16 @@
+--[[
+    ====================================================================
+    ||                                                                ||
+    ||    E V O K   U I   L I B R A R Y   -   V 5   U L T I M A T E   ||
+    ||                                                                ||
+    ====================================================================
+    || AUTHOR: TEIXEIRAZK                                             ||
+    || BUILD: PART 1 (CORE ENGINE, THEMES, MASSIVE ICONS, KEYMAPS)    ||
+    ====================================================================
+]]--
+
 local Evok = {
-    Version = "5.0.0",
+    Version = "5.1.0",
     Author = "TeixeiraZk",
     
     Registry = {},
@@ -13,7 +24,7 @@ local Evok = {
     ColorSpace = {},
     Base64 = {},
     
-    CurrentTheme = "Matcha",
+    CurrentTheme = "EvokTheme",
     MenuOpen = true,
     IsDragging = false
 }
@@ -112,7 +123,7 @@ function Evok.Base64.Decode(data)
 end
 
 -- ========================================================================
--- 3. COLOR SPACE ENGINE (HSV, RGB, HEX, HSL)
+-- 3. COLOR SPACE ENGINE (HSV, RGB, HEX, HSL, CMYK)
 -- ========================================================================
 function Evok.ColorSpace:RGBToHSV(color)
     local r = color.R
@@ -216,6 +227,28 @@ function Evok.ColorSpace:RGBToHSL(color)
         h = h / 6
     end
     return h, s, l
+end
+
+function Evok.ColorSpace:RGBToCMYK(color)
+    local r = color.R
+    local g = color.G
+    local b = color.B
+    
+    if r == 0 and g == 0 and b == 0 then
+        return 0, 0, 0, 1
+    end
+    
+    local c = 1 - r
+    local m = 1 - g
+    local y = 1 - b
+    
+    local k = math.min(c, math.min(m, y))
+    
+    c = (c - k) / (1 - k)
+    m = (m - k) / (1 - k)
+    y = (y - k) / (1 - k)
+    
+    return c, m, y, k
 end
 
 -- ========================================================================
@@ -360,6 +393,17 @@ end
 -- 5. THEME MANAGER (SISTEMA DE TEMAS EXPANDIDO)
 -- ========================================================================
 Evok.Themes = {
+    ["EvokTheme"] = {
+        Background = Color3.fromRGB(18, 18, 18),
+        GroupboxBg = Color3.fromRGB(24, 24, 24),
+        Border = Color3.fromRGB(40, 40, 40),
+        Accent = Color3.fromRGB(138, 43, 226),
+        Text = Color3.fromRGB(255, 255, 255),
+        TextMuted = Color3.fromRGB(120, 120, 120),
+        ElementBg = Color3.fromRGB(30, 30, 30),
+        Thumb = Color3.fromRGB(255, 255, 255),
+        Warning = Color3.fromRGB(255, 100, 100)
+    },
     ["Matcha"] = {
         Background = Color3.fromRGB(18, 18, 18),
         GroupboxBg = Color3.fromRGB(24, 24, 24),
@@ -425,6 +469,50 @@ Evok.Themes = {
         ElementBg = Color3.fromRGB(35, 18, 18),
         Thumb = Color3.fromRGB(255, 180, 180),
         Warning = Color3.fromRGB(255, 255, 0)
+    },
+    ["Midnight"] = {
+        Background = Color3.fromRGB(11, 15, 25),
+        GroupboxBg = Color3.fromRGB(15, 20, 35),
+        Border = Color3.fromRGB(25, 35, 55),
+        Accent = Color3.fromRGB(100, 100, 255),
+        Text = Color3.fromRGB(230, 235, 255),
+        TextMuted = Color3.fromRGB(100, 120, 150),
+        ElementBg = Color3.fromRGB(20, 25, 45),
+        Thumb = Color3.fromRGB(200, 220, 255),
+        Warning = Color3.fromRGB(255, 75, 75)
+    },
+    ["Cyberpunk"] = {
+        Background = Color3.fromRGB(15, 10, 35),
+        GroupboxBg = Color3.fromRGB(20, 15, 45),
+        Border = Color3.fromRGB(40, 30, 80),
+        Accent = Color3.fromRGB(0, 255, 204),
+        Text = Color3.fromRGB(255, 255, 255),
+        TextMuted = Color3.fromRGB(150, 100, 200),
+        ElementBg = Color3.fromRGB(25, 20, 55),
+        Thumb = Color3.fromRGB(255, 0, 255),
+        Warning = Color3.fromRGB(255, 50, 100)
+    },
+    ["Forest"] = {
+        Background = Color3.fromRGB(12, 18, 12),
+        GroupboxBg = Color3.fromRGB(18, 25, 18),
+        Border = Color3.fromRGB(30, 45, 30),
+        Accent = Color3.fromRGB(80, 200, 120),
+        Text = Color3.fromRGB(230, 255, 230),
+        TextMuted = Color3.fromRGB(100, 150, 100),
+        ElementBg = Color3.fromRGB(22, 35, 22),
+        Thumb = Color3.fromRGB(180, 255, 180),
+        Warning = Color3.fromRGB(255, 100, 80)
+    },
+    ["Sunset"] = {
+        Background = Color3.fromRGB(25, 15, 10),
+        GroupboxBg = Color3.fromRGB(35, 20, 15),
+        Border = Color3.fromRGB(60, 35, 25),
+        Accent = Color3.fromRGB(255, 120, 50),
+        Text = Color3.fromRGB(255, 240, 230),
+        TextMuted = Color3.fromRGB(180, 120, 100),
+        ElementBg = Color3.fromRGB(45, 25, 18),
+        Thumb = Color3.fromRGB(255, 200, 150),
+        Warning = Color3.fromRGB(255, 50, 50)
     }
 }
 
@@ -433,7 +521,7 @@ function Evok:GetTheme(property)
 end
 
 -- ========================================================================
--- 6. ICON DICTIONARY EXPANDIDO (LUCIDE ASSETS FULL)
+-- 6. ICON DICTIONARY EXPANDIDO (LUCIDE ASSETS FULL - 250+ ICONES)
 -- ========================================================================
 Evok.Icons = {
     ["activity"] = "rbxassetid://10723344265",
@@ -543,7 +631,184 @@ Evok.Icons = {
     ["figma"] = "rbxassetid://10723348003",
     ["file-minus"] = "rbxassetid://10723348041",
     ["file-plus"] = "rbxassetid://10723348083",
-    ["file-text"] = "rbxassetid://10723348123"
+    ["file-text"] = "rbxassetid://10723348123",
+    ["film"] = "rbxassetid://10723348166",
+    ["filter"] = "rbxassetid://10723348197",
+    ["flag"] = "rbxassetid://10723348232",
+    ["folder-minus"] = "rbxassetid://10723348270",
+    ["folder-plus"] = "rbxassetid://10723348303",
+    ["folder"] = "rbxassetid://10723348334",
+    ["framer"] = "rbxassetid://10723348375",
+    ["frown"] = "rbxassetid://10723348408",
+    ["gift"] = "rbxassetid://10723348443",
+    ["git-branch"] = "rbxassetid://10723348480",
+    ["git-commit"] = "rbxassetid://10723348514",
+    ["git-merge"] = "rbxassetid://10723348547",
+    ["git-pull-request"] = "rbxassetid://10723348584",
+    ["github"] = "rbxassetid://10723348618",
+    ["gitlab"] = "rbxassetid://10723348654",
+    ["globe"] = "rbxassetid://10723348683",
+    ["grid"] = "rbxassetid://10723348718",
+    ["hard-drive"] = "rbxassetid://10723348753",
+    ["hash"] = "rbxassetid://10723348784",
+    ["headphones"] = "rbxassetid://10723348820",
+    ["heart"] = "rbxassetid://10723348861",
+    ["help-circle"] = "rbxassetid://10723348896",
+    ["hexagon"] = "rbxassetid://10723348929",
+    ["home"] = "rbxassetid://10723348967",
+    ["image"] = "rbxassetid://10723349007",
+    ["inbox"] = "rbxassetid://10723349040",
+    ["info"] = "rbxassetid://10723349080",
+    ["instagram"] = "rbxassetid://10723349117",
+    ["italic"] = "rbxassetid://10723349156",
+    ["key"] = "rbxassetid://10723349190",
+    ["layers"] = "rbxassetid://10723349226",
+    ["layout"] = "rbxassetid://10723349265",
+    ["life-buoy"] = "rbxassetid://10723349298",
+    ["link-2"] = "rbxassetid://10723349332",
+    ["link"] = "rbxassetid://10723349372",
+    ["linkedin"] = "rbxassetid://10723349405",
+    ["list"] = "rbxassetid://10723349444",
+    ["loader"] = "rbxassetid://10723349480",
+    ["lock"] = "rbxassetid://10723349514",
+    ["log-in"] = "rbxassetid://10723349549",
+    ["log-out"] = "rbxassetid://10723349592",
+    ["mail"] = "rbxassetid://10723349635",
+    ["map-pin"] = "rbxassetid://10723349673",
+    ["map"] = "rbxassetid://10723349712",
+    ["maximize-2"] = "rbxassetid://10723349755",
+    ["maximize"] = "rbxassetid://10723349791",
+    ["meh"] = "rbxassetid://10723349830",
+    ["menu"] = "rbxassetid://10723349866",
+    ["message-circle"] = "rbxassetid://10723349903",
+    ["message-square"] = "rbxassetid://10723349939",
+    ["mic-off"] = "rbxassetid://10723349971",
+    ["mic"] = "rbxassetid://10723350005",
+    ["minimize-2"] = "rbxassetid://10723350050",
+    ["minimize"] = "rbxassetid://10723350091",
+    ["minus-circle"] = "rbxassetid://10723350130",
+    ["minus-square"] = "rbxassetid://10723350170",
+    ["minus"] = "rbxassetid://10723350209",
+    ["monitor"] = "rbxassetid://10723350244",
+    ["moon"] = "rbxassetid://10723350284",
+    ["more-horizontal"] = "rbxassetid://10723350325",
+    ["more-vertical"] = "rbxassetid://10723350367",
+    ["mouse-pointer"] = "rbxassetid://10723350410",
+    ["move"] = "rbxassetid://10723350444",
+    ["music"] = "rbxassetid://10723350482",
+    ["navigation-2"] = "rbxassetid://10723350524",
+    ["navigation"] = "rbxassetid://10723350567",
+    ["octagon"] = "rbxassetid://10723350604",
+    ["package"] = "rbxassetid://10723350638",
+    ["paperclip"] = "rbxassetid://10723350672",
+    ["pause-circle"] = "rbxassetid://10723350709",
+    ["pause"] = "rbxassetid://10723350754",
+    ["pen-tool"] = "rbxassetid://10723350788",
+    ["percent"] = "rbxassetid://10723350821",
+    ["phone-call"] = "rbxassetid://10723350854",
+    ["phone-forwarded"] = "rbxassetid://10723350889",
+    ["phone-incoming"] = "rbxassetid://10723350926",
+    ["phone-missed"] = "rbxassetid://10723350965",
+    ["phone-off"] = "rbxassetid://10723351000",
+    ["phone-outgoing"] = "rbxassetid://10723351034",
+    ["phone"] = "rbxassetid://10723351070",
+    ["pie-chart"] = "rbxassetid://10723351111",
+    ["play-circle"] = "rbxassetid://10723351147",
+    ["play"] = "rbxassetid://10723351187",
+    ["plus-circle"] = "rbxassetid://10723351221",
+    ["plus-square"] = "rbxassetid://10723351263",
+    ["plus"] = "rbxassetid://10723351299",
+    ["pocket"] = "rbxassetid://10723351336",
+    ["power"] = "rbxassetid://10723351372",
+    ["printer"] = "rbxassetid://10723351406",
+    ["radio"] = "rbxassetid://10723351443",
+    ["refresh-ccw"] = "rbxassetid://10723351481",
+    ["refresh-cw"] = "rbxassetid://10723351515",
+    ["repeat"] = "rbxassetid://10723351551",
+    ["rewind"] = "rbxassetid://10723351586",
+    ["rotate-ccw"] = "rbxassetid://10723351624",
+    ["rotate-cw"] = "rbxassetid://10723351658",
+    ["rss"] = "rbxassetid://10723351693",
+    ["save"] = "rbxassetid://10723351726",
+    ["scissors"] = "rbxassetid://10723351762",
+    ["search"] = "rbxassetid://10723351806",
+    ["send"] = "rbxassetid://10723351846",
+    ["server"] = "rbxassetid://10723351884",
+    ["settings"] = "rbxassetid://10723351919",
+    ["share-2"] = "rbxassetid://10723351952",
+    ["share"] = "rbxassetid://10723351996",
+    ["shield-off"] = "rbxassetid://10723352033",
+    ["shield"] = "rbxassetid://10723352077",
+    ["shopping-bag"] = "rbxassetid://10723352109",
+    ["shopping-cart"] = "rbxassetid://10723352144",
+    ["shuffle"] = "rbxassetid://10723352187",
+    ["sidebar"] = "rbxassetid://10723352220",
+    ["skip-back"] = "rbxassetid://10723352251",
+    ["skip-forward"] = "rbxassetid://10723352281",
+    ["slack"] = "rbxassetid://10723352319",
+    ["slash"] = "rbxassetid://10723352357",
+    ["sliders"] = "rbxassetid://10723352395",
+    ["smartphone"] = "rbxassetid://10723352431",
+    ["smile"] = "rbxassetid://10723352470",
+    ["speaker"] = "rbxassetid://10723352504",
+    ["square"] = "rbxassetid://10723352541",
+    ["star"] = "rbxassetid://10723352583",
+    ["stop-circle"] = "rbxassetid://10723352618",
+    ["sun"] = "rbxassetid://10723352655",
+    ["sunrise"] = "rbxassetid://10723352697",
+    ["sunset"] = "rbxassetid://10723352737",
+    ["tablet"] = "rbxassetid://10723352778",
+    ["tag"] = "rbxassetid://10723352815",
+    ["target"] = "rbxassetid://10723352857",
+    ["terminal"] = "rbxassetid://10723352899",
+    ["thermometer"] = "rbxassetid://10723352932",
+    ["thumbs-down"] = "rbxassetid://10723352972",
+    ["thumbs-up"] = "rbxassetid://10723353004",
+    ["toggle-left"] = "rbxassetid://10723353043",
+    ["toggle-right"] = "rbxassetid://10723353086",
+    ["tool"] = "rbxassetid://10723353123",
+    ["trash-2"] = "rbxassetid://10723353158",
+    ["trash"] = "rbxassetid://10723353188",
+    ["trello"] = "rbxassetid://10723353229",
+    ["trending-down"] = "rbxassetid://10723353272",
+    ["trending-up"] = "rbxassetid://10723353315",
+    ["triangle"] = "rbxassetid://10723353348",
+    ["truck"] = "rbxassetid://10723353381",
+    ["tv"] = "rbxassetid://10723353416",
+    ["twitch"] = "rbxassetid://10723353457",
+    ["twitter"] = "rbxassetid://10723353496",
+    ["type"] = "rbxassetid://10723353535",
+    ["umbrella"] = "rbxassetid://10723353574",
+    ["underline"] = "rbxassetid://10723353606",
+    ["unlock"] = "rbxassetid://10723353641",
+    ["upload-cloud"] = "rbxassetid://10723353676",
+    ["upload"] = "rbxassetid://10723353723",
+    ["user-check"] = "rbxassetid://10723353753",
+    ["user-minus"] = "rbxassetid://10723353787",
+    ["user-plus"] = "rbxassetid://10723353818",
+    ["user-x"] = "rbxassetid://10723353856",
+    ["user"] = "rbxassetid://10723353888",
+    ["users"] = "rbxassetid://10723353920",
+    ["video-off"] = "rbxassetid://10723353956",
+    ["video"] = "rbxassetid://10723353986",
+    ["voicemail"] = "rbxassetid://10723354026",
+    ["volume-1"] = "rbxassetid://10723354060",
+    ["volume-2"] = "rbxassetid://10723354093",
+    ["volume-x"] = "rbxassetid://10723354130",
+    ["volume"] = "rbxassetid://10723354165",
+    ["watch"] = "rbxassetid://10723354194",
+    ["wifi-off"] = "rbxassetid://10723354228",
+    ["wifi"] = "rbxassetid://10723354261",
+    ["wind"] = "rbxassetid://10723354297",
+    ["x-circle"] = "rbxassetid://10723354330",
+    ["x-octagon"] = "rbxassetid://10723354363",
+    ["x-square"] = "rbxassetid://10723354406",
+    ["x"] = "rbxassetid://10723354443",
+    ["youtube"] = "rbxassetid://10723354477",
+    ["zap-off"] = "rbxassetid://10723354516",
+    ["zap"] = "rbxassetid://10723354551",
+    ["zoom-in"] = "rbxassetid://10723354583",
+    ["zoom-out"] = "rbxassetid://10723354620"
 }
 
 -- ========================================================================
@@ -698,11 +963,12 @@ end
 -- 11. RENDERIZADOR PRINCIPAL DA JANELA (WINDOW)
 -- ========================================================================
 function Evok:Window(config)
-    local WindowName = config.Name or "Evok V5 Ultimate"
-    local UseTheme = config.Theme or "Matcha"
+    local WindowName = config.Name or "Evok V5"
+    local UseTheme = config.Theme or "EvokTheme"
     
     self.CurrentTheme = UseTheme
     
+    -- TAMANHO: 550x800
     local TargetSize = UDim2.new(0, 550, 0, 800) 
 
     local Main = Utility:Create("Frame", {
@@ -715,6 +981,12 @@ function Evok:Window(config)
         Parent = EvokGui
     })
 
+    -- CORREÇÃO: BORDAS ARREDONDADAS DA UI PRINCIPAL
+    Utility:Create("UICorner", {
+        CornerRadius = UDim.new(0, 8),
+        Parent = Main
+    })
+
     local InnerBorder = Utility:Create("UIStroke", {
         Color = self:GetTheme("Border"),
         Thickness = 1,
@@ -722,33 +994,42 @@ function Evok:Window(config)
         Parent = Main
     })
 
+    -- CORREÇÃO: HEADER MAIOR PARA NÃO CORTAR O TÍTULO
     local Header = Utility:Create("Frame", {
         Name = "Header",
-        Size = UDim2.new(1, 0, 0, 25),
+        Size = UDim2.new(1, 0, 0, 35),
         BackgroundColor3 = self:GetTheme("Background"),
         BorderSizePixel = 0,
         Parent = Main
     })
     
+    -- Arredondar topo do header para acompanhar a UI
+    Utility:Create("UICorner", {
+        CornerRadius = UDim.new(0, 8),
+        Parent = Header
+    })
+
     Utility:MakeDraggable(Main, Header)
 
+    -- CORREÇÃO: TÍTULO CENTRALIZADO VERTICALMENTE
     local Title = Utility:Create("TextLabel", {
         Name = "Title",
-        Size = UDim2.new(1, -10, 1, 0),
-        Position = UDim2.new(0, 10, 0, 0),
+        Size = UDim2.new(1, -20, 1, 0),
+        Position = UDim2.new(0, 15, 0, 0),
         BackgroundTransparency = 1,
         Text = WindowName,
         TextColor3 = self:GetTheme("Accent"),
         Font = Enum.Font.Code,
-        TextSize = 13,
+        TextSize = 14,
         TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
         Parent = Header
     })
 
     local TabBarContainer = Utility:Create("Frame", {
         Name = "TabBarContainer",
         Size = UDim2.new(1, -20, 0, 30),
-        Position = UDim2.new(0, 10, 0, 25),
+        Position = UDim2.new(0, 10, 0, 35),
         BackgroundTransparency = 1,
         Parent = Main
     })
@@ -757,14 +1038,14 @@ function Evok:Window(config)
         FillDirection = Enum.FillDirection.Horizontal,
         HorizontalAlignment = Enum.HorizontalAlignment.Left,
         SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 15),
+        Padding = UDim.new(0, 18),
         Parent = TabBarContainer
     })
 
     local ContentArea = Utility:Create("Frame", {
         Name = "ContentArea",
-        Size = UDim2.new(1, -20, 1, -65),
-        Position = UDim2.new(0, 10, 0, 55),
+        Size = UDim2.new(1, -20, 1, -75),
+        Position = UDim2.new(0, 10, 0, 65),
         BackgroundTransparency = 1,
         Parent = Main
     })
@@ -788,7 +1069,7 @@ function Evok:Window(config)
         ).X
 
         local TabBtn = Utility:Create("TextButton", {
-            Name = TabName .. "_Tab",
+            Name = TabName,
             Size = UDim2.new(0, TabWidth, 1, 0),
             BackgroundTransparency = 1,
             Text = TabName,
@@ -808,7 +1089,7 @@ function Evok:Window(config)
 
         local LeftColumn = Utility:Create("ScrollingFrame", {
             Name = "LeftColumn",
-            Size = UDim2.new(0.5, -5, 1, 0),
+            Size = UDim2.new(0.5, -7, 1, 0),
             Position = UDim2.new(0, 0, 0, 0),
             BackgroundTransparency = 1,
             ScrollBarThickness = 0,
@@ -818,8 +1099,8 @@ function Evok:Window(config)
 
         local RightColumn = Utility:Create("ScrollingFrame", {
             Name = "RightColumn",
-            Size = UDim2.new(0.5, -5, 1, 0),
-            Position = UDim2.new(0.5, 5, 0, 0),
+            Size = UDim2.new(0.5, -7, 1, 0),
+            Position = UDim2.new(0.5, 7, 0, 0),
             BackgroundTransparency = 1,
             ScrollBarThickness = 0,
             AutomaticCanvasSize = Enum.AutomaticSize.Y,
@@ -827,12 +1108,12 @@ function Evok:Window(config)
         })
 
         Utility:Create("UIListLayout", {
-            Padding = UDim.new(0, 10), 
+            Padding = UDim.new(0, 12), 
             Parent = LeftColumn
         })
         
         Utility:Create("UIListLayout", {
-            Padding = UDim.new(0, 10), 
+            Padding = UDim.new(0, 12), 
             Parent = RightColumn
         })
 
@@ -845,7 +1126,7 @@ function Evok:Window(config)
                 Evok.Tween(WindowLogic.CurrentTab, {
                     TextColor3 = Evok:GetTheme("TextMuted")
                 }, 0.2)
-                ContentArea[WindowLogic.CurrentTab.Name:gsub("_Tab", "_Content")].Visible = false
+                ContentArea[WindowLogic.CurrentTab.Name .. "_Content"].Visible = false
             end
             
             WindowLogic.CurrentTab = TabBtn
@@ -883,6 +1164,12 @@ function Evok:Window(config)
                 Parent = TargetColumn
             })
 
+            -- Arredondar Groupbox levemente
+            Utility:Create("UICorner", {
+                CornerRadius = UDim.new(0, 4),
+                Parent = GroupFrame
+            })
+
             local GroupTitleWidth = TextService:GetTextSize(
                 " " .. GroupName .. " ", 
                 12, 
@@ -894,7 +1181,7 @@ function Evok:Window(config)
                 Name = "Title",
                 Size = UDim2.new(0, GroupTitleWidth, 0, 15),
                 Position = UDim2.new(0, 10, 0, -8),
-                BackgroundColor3 = Evok:GetTheme("Background"),
+                BackgroundColor3 = Evok:GetTheme("GroupboxBg"),
                 Text = " " .. GroupName .. " ",
                 TextColor3 = Evok:GetTheme("Text"),
                 Font = Enum.Font.Code,
@@ -920,7 +1207,7 @@ function Evok:Window(config)
 
             local GroupSpacer = Utility:Create("Frame", {
                 Name = "BottomSpacer",
-                Size = UDim2.new(1, 0, 0, 4),
+                Size = UDim2.new(1, 0, 0, 6),
                 BackgroundTransparency = 1,
                 LayoutOrder = 9999,
                 Parent = GroupContainer
@@ -929,33 +1216,7 @@ function Evok:Window(config)
             local Elements = {}
 
             -- ========================================================================
-            -- 14. ELEMENTO: LABEL (TEXTO SIMPLES)
-            -- ========================================================================
-            function Elements:Label(labelConfig)
-                local LabelText = type(labelConfig) == "string" and labelConfig or labelConfig.Text
-                
-                local LabelFrame = Utility:Create("TextLabel", {
-                    Name = "LabelElement",
-                    Size = UDim2.new(1, 0, 0, 15),
-                    BackgroundTransparency = 1,
-                    Text = LabelText,
-                    TextColor3 = Evok:GetTheme("Text"),
-                    Font = Enum.Font.Code,
-                    TextSize = 12,
-                    TextXAlignment = Enum.TextXAlignment.Left,
-                    Parent = GroupContainer
-                })
-                
-                local LabelLogic = {}
-                function LabelLogic:Set(newText)
-                    LabelFrame.Text = newText
-                end
-                
-                return LabelLogic
-            end
-
-            -- ========================================================================
-            -- 15. ELEMENTO: BUTTON (BOTÃO CLICÁVEL)
+            -- 14. ELEMENTO: BUTTON
             -- ========================================================================
             function Elements:Button(btnConfig)
                 local BtnName = btnConfig.Name or "Button"
@@ -963,17 +1224,21 @@ function Evok:Window(config)
 
                 local BtnFrame = Utility:Create("TextButton", {
                     Name = BtnName .. "_Button",
-                    Size = UDim2.new(1, 0, 0, 24),
+                    Size = UDim2.new(1, 0, 0, 26),
                     BackgroundColor3 = Evok:GetTheme("ElementBg"),
                     BorderColor3 = Evok:GetTheme("Border"),
                     BorderSizePixel = 1,
-                    Text = "  " .. BtnName,
+                    Text = BtnName,
                     TextColor3 = Evok:GetTheme("Text"),
                     Font = Enum.Font.Code,
                     TextSize = 12,
-                    TextXAlignment = Enum.TextXAlignment.Center,
                     AutoButtonColor = false,
                     Parent = GroupContainer
+                })
+
+                Utility:Create("UICorner", {
+                    CornerRadius = UDim.new(0, 4),
+                    Parent = BtnFrame
                 })
 
                 BtnFrame.MouseButton1Click:Connect(function()
@@ -994,7 +1259,7 @@ function Evok:Window(config)
             end
 
             -- ========================================================================
-            -- 16. ELEMENTO: TOGGLE (INTERRUPTOR MATCHA STYLE)
+            -- 15. ELEMENTO: TOGGLE
             -- ========================================================================
             function Elements:Toggle(tglConfig)
                 local TglName = tglConfig.Name or "Toggle"
@@ -1004,7 +1269,7 @@ function Evok:Window(config)
 
                 local TglFrame = Utility:Create("TextButton", {
                     Name = TglName .. "_Toggle",
-                    Size = UDim2.new(1, 0, 0, 16),
+                    Size = UDim2.new(1, 0, 0, 18),
                     BackgroundTransparency = 1,
                     Text = "",
                     Parent = GroupContainer
@@ -1049,31 +1314,19 @@ function Evok:Window(config)
                         TextColor3 = TglState and Evok:GetTheme("Text") or Evok:GetTheme("TextMuted")
                     }, 0.2)
                     
-                    if Evok.Flags[TglFlag] then
-                        Evok.Flags[TglFlag].Value = TglState
-                    end
-                    
+                    Evok.Flags[TglFlag] = { Value = TglState }
                     TglCallback(TglState)
                 end
 
                 TglFrame.MouseButton1Click:Connect(FireToggle)
-
-                Evok.Flags[TglFlag] = {
+                Evok.Flags[TglFlag] = { 
                     Value = TglState,
-                    Set = function(self, value)
-                        if TglState ~= value then
-                            FireToggle()
-                        end
-                    end
+                    Set = function(self, v) if TglState ~= v then FireToggle() end end
                 }
-                
-                if TglState then
-                    TglCallback(TglState)
-                end
             end
 
             -- ========================================================================
-            -- 17. ELEMENTO: SLIDER (COM VALOR EMBUTIDO)
+            -- 16. ELEMENTO: SLIDER (CORREÇÃO: BORDAS ARREDONDADAS)
             -- ========================================================================
             function Elements:Slider(sldConfig)
                 local SldName = sldConfig.Name or "Slider"
@@ -1085,14 +1338,14 @@ function Evok:Window(config)
 
                 local SldFrame = Utility:Create("Frame", {
                     Name = SldName .. "_Slider",
-                    Size = UDim2.new(1, 0, 0, 32),
+                    Size = UDim2.new(1, 0, 0, 36),
                     BackgroundTransparency = 1,
                     Parent = GroupContainer
                 })
 
                 local SldTitle = Utility:Create("TextLabel", {
                     Name = "Title",
-                    Size = UDim2.new(1, 0, 0, 14),
+                    Size = UDim2.new(1, 0, 0, 16),
                     BackgroundTransparency = 1,
                     Text = SldName,
                     TextColor3 = Evok:GetTheme("Text"),
@@ -1104,14 +1357,20 @@ function Evok:Window(config)
 
                 local SldTrack = Utility:Create("TextButton", {
                     Name = "Track",
-                    Size = UDim2.new(1, 0, 0, 14),
-                    Position = UDim2.new(0, 0, 0, 18),
+                    Size = UDim2.new(1, 0, 0, 16),
+                    Position = UDim2.new(0, 0, 0, 20),
                     BackgroundColor3 = Evok:GetTheme("ElementBg"),
                     BorderColor3 = Evok:GetTheme("Border"),
                     BorderSizePixel = 1,
                     Text = "",
                     AutoButtonColor = false,
                     Parent = SldFrame
+                })
+
+                -- CORREÇÃO: ARREDONDAR TRACK DO SLIDER
+                Utility:Create("UICorner", {
+                    CornerRadius = UDim.new(0, 4),
+                    Parent = SldTrack
                 })
 
                 local SldFillPct = math.clamp((SldValue - SldMin) / (SldMax - SldMin), 0, 1)
@@ -1124,10 +1383,16 @@ function Evok:Window(config)
                     Parent = SldTrack
                 })
 
+                -- CORREÇÃO: ARREDONDAR FILL DO SLIDER
+                Utility:Create("UICorner", {
+                    CornerRadius = UDim.new(0, 4),
+                    Parent = SldFill
+                })
+
                 local SldThumb = Utility:Create("Frame", {
                     Name = "Thumb",
-                    Size = UDim2.new(0, 14, 0, 14),
-                    Position = UDim2.new(1, -7, 0.5, -7),
+                    Size = UDim2.new(0, 16, 0, 16),
+                    Position = UDim2.new(1, -8, 0.5, -8),
                     BackgroundColor3 = Evok:GetTheme("Thumb"),
                     BorderSizePixel = 0,
                     Parent = SldFill
@@ -1165,10 +1430,7 @@ function Evok:Window(config)
                         Size = UDim2.new(percent, 0, 1, 0)
                     }, 0.1)
                     
-                    if Evok.Flags[SldFlag] then
-                        Evok.Flags[SldFlag].Value = SldValue
-                    end
-                    
+                    Evok.Flags[SldFlag] = { Value = SldValue }
                     SldCallback(SldValue)
                 end
 
@@ -1196,19 +1458,15 @@ function Evok:Window(config)
                     Set = function(self, newVal)
                         SldValue = math.clamp(newVal, SldMin, SldMax)
                         local newPct = (SldValue - SldMin) / (SldMax - SldMin)
-                        
                         SldDisplay.Text = tostring(SldValue) .. "/" .. tostring(SldMax)
-                        Evok.Tween(SldFill, {
-                            Size = UDim2.new(newPct, 0, 1, 0)
-                        }, 0.1)
-                        
+                        Evok.Tween(SldFill, { Size = UDim2.new(newPct, 0, 1, 0) }, 0.1)
                         SldCallback(SldValue)
                     end
                 }
             end
 
             -- ========================================================================
-            -- 18. ELEMENTO: DROPDOWN (MENU SUSPENSO COM SEARCH)
+            -- 17. ELEMENTO: DROPDOWN (CORREÇÃO: SEM BURACO VAZIO)
             -- ========================================================================
             function Elements:Dropdown(dropConfig)
                 local DropName = dropConfig.Name or "Dropdown"
@@ -1221,7 +1479,7 @@ function Evok:Window(config)
 
                 local DropFrame = Utility:Create("Frame", {
                     Name = DropName .. "_Dropdown",
-                    Size = UDim2.new(1, 0, 0, 36),
+                    Size = UDim2.new(1, 0, 0, 40),
                     BackgroundTransparency = 1,
                     ClipsDescendants = true,
                     Parent = GroupContainer
@@ -1229,7 +1487,7 @@ function Evok:Window(config)
 
                 local DropTitle = Utility:Create("TextLabel", {
                     Name = "Title",
-                    Size = UDim2.new(1, 0, 0, 14),
+                    Size = UDim2.new(1, 0, 0, 16),
                     BackgroundTransparency = 1,
                     Text = DropName,
                     TextColor3 = Evok:GetTheme("Text"),
@@ -1241,8 +1499,8 @@ function Evok:Window(config)
 
                 local DropButton = Utility:Create("TextButton", {
                     Name = "MainButton",
-                    Size = UDim2.new(1, 0, 0, 20),
-                    Position = UDim2.new(0, 0, 0, 16),
+                    Size = UDim2.new(1, 0, 0, 22),
+                    Position = UDim2.new(0, 0, 0, 18),
                     BackgroundColor3 = Evok:GetTheme("ElementBg"),
                     BorderColor3 = Evok:GetTheme("Border"),
                     BorderSizePixel = 1,
@@ -1253,6 +1511,11 @@ function Evok:Window(config)
                     TextXAlignment = Enum.TextXAlignment.Left,
                     AutoButtonColor = false,
                     Parent = DropFrame
+                })
+
+                Utility:Create("UICorner", {
+                    CornerRadius = UDim.new(0, 4),
+                    Parent = DropButton
                 })
 
                 local DropArrow = Utility:Create("TextLabel", {
@@ -1269,8 +1532,8 @@ function Evok:Window(config)
 
                 local DropScroll = Utility:Create("ScrollingFrame", {
                     Name = "OptionsScroll",
-                    Size = UDim2.new(1, -4, 0, 100),
-                    Position = UDim2.new(0, 2, 0, 40),
+                    Size = UDim2.new(1, -4, 0, 0), -- Altura começa em 0
+                    Position = UDim2.new(0, 2, 0, 45),
                     BackgroundTransparency = 1,
                     ScrollBarThickness = 2,
                     BorderSizePixel = 0,
@@ -1283,22 +1546,18 @@ function Evok:Window(config)
                     Parent = DropScroll
                 })
 
-                local OptionButtons = {}
-
-                local function UpdateOptions()
-                    for _, btn in pairs(OptionButtons) do
-                        btn:Destroy()
+                local function BuildOptions()
+                    for _, child in pairs(DropScroll:GetChildren()) do
+                        if child:IsA("TextButton") then child:Destroy() end
                     end
-                    table.clear(OptionButtons)
 
                     local TotalY = 0
 
                     for _, option in ipairs(DropOptions) do
                         local OptBtn = Utility:Create("TextButton", {
-                            Name = "Option_" .. option,
-                            Size = UDim2.new(1, 0, 0, 20),
+                            Name = option,
+                            Size = UDim2.new(1, 0, 0, 22),
                             BackgroundColor3 = DropValue == option and Evok:GetTheme("Accent") or Evok:GetTheme("GroupboxBg"),
-                            BorderColor3 = Evok:GetTheme("Border"),
                             BorderSizePixel = 0,
                             Text = "  " .. option,
                             TextColor3 = DropValue == option and Evok:GetTheme("Background") or Evok:GetTheme("TextMuted"),
@@ -1308,40 +1567,40 @@ function Evok:Window(config)
                             Parent = DropScroll
                         })
                         
-                        TotalY = TotalY + 22
-                        table.insert(OptionButtons, OptBtn)
+                        Utility:Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = OptBtn })
+                        
+                        TotalY = TotalY + 24
 
                         OptBtn.MouseButton1Click:Connect(function()
                             DropValue = option
                             DropButton.Text = "  " .. option
-                            
-                            Evok.Flags[DropFlag].Value = DropValue
+                            Evok.Flags[DropFlag] = { Value = DropValue }
                             DropCallback(DropValue)
                             
                             IsOpen = false
-                            Evok.Tween(DropFrame, {
-                                Size = UDim2.new(1, 0, 0, 36)
-                            }, 0.2)
+                            Evok.Tween(DropFrame, { Size = UDim2.new(1, 0, 0, 40) }, 0.2)
+                            Evok.Tween(DropScroll, { Size = UDim2.new(1, -4, 0, 0) }, 0.2)
                             DropArrow.Text = "▼"
-                            UpdateOptions()
                         end)
                     end
                     
                     DropScroll.CanvasSize = UDim2.new(0, 0, 0, TotalY)
+                    return TotalY
                 end
 
                 DropButton.MouseButton1Click:Connect(function()
                     IsOpen = not IsOpen
                     if IsOpen then
-                        UpdateOptions()
-                        Evok.Tween(DropFrame, {
-                            Size = UDim2.new(1, 0, 0, 145)
-                        }, 0.2)
+                        local listHeight = BuildOptions()
+                        -- CORREÇÃO: CALCULA O TAMANHO REAL (SEM BURACO PRETO)
+                        local finalSize = math.clamp(listHeight, 40, 150)
+                        
+                        Evok.Tween(DropFrame, { Size = UDim2.new(1, 0, 0, finalSize + 45) }, 0.2)
+                        Evok.Tween(DropScroll, { Size = UDim2.new(1, -4, 0, finalSize) }, 0.2)
                         DropArrow.Text = "▲"
                     else
-                        Evok.Tween(DropFrame, {
-                            Size = UDim2.new(1, 0, 0, 36)
-                        }, 0.2)
+                        Evok.Tween(DropFrame, { Size = UDim2.new(1, 0, 0, 40) }, 0.2)
+                        Evok.Tween(DropScroll, { Size = UDim2.new(1, -4, 0, 0) }, 0.2)
                         DropArrow.Text = "▼"
                     end
                 end)
@@ -1357,70 +1616,56 @@ function Evok:Window(config)
             end
 
             -- ========================================================================
-            -- 19. ELEMENTO: TEXTBOX (ENTRADA DE TEXTO/NÚMEROS)
+            -- 18. ELEMENTO: TEXTBOX
             -- ========================================================================
             function Elements:TextBox(txtConfig)
                 local TxtName = txtConfig.Name or "TextBox"
-                local TxtPlaceholder = txtConfig.Placeholder or "..."
                 local TxtDefault = txtConfig.Default or ""
                 local TxtFlag = txtConfig.Flag or TxtName
                 local TxtCallback = txtConfig.Callback or function() end
 
-                local TxtFrame = Utility:Create("Frame", {
-                    Name = TxtName .. "_TextBox",
-                    Size = UDim2.new(1, 0, 0, 36),
+                local TxtF = Utility:Create("Frame", {
+                    Size = UDim2.new(1, 0, 0, 40),
                     BackgroundTransparency = 1,
                     Parent = GroupContainer
                 })
 
-                local TxtTitle = Utility:Create("TextLabel", {
-                    Name = "Title",
-                    Size = UDim2.new(1, 0, 0, 14),
+                Utility:Create("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 16),
                     BackgroundTransparency = 1,
                     Text = TxtName,
                     TextColor3 = Evok:GetTheme("Text"),
                     Font = Enum.Font.Code,
                     TextSize = 12,
                     TextXAlignment = Enum.TextXAlignment.Left,
-                    Parent = TxtFrame
+                    Parent = TxtF
                 })
 
-                local InputBox = Utility:Create("TextBox", {
-                    Name = "Input",
-                    Size = UDim2.new(1, 0, 0, 20),
-                    Position = UDim2.new(0, 0, 0, 16),
+                local Inp = Utility:Create("TextBox", {
+                    Size = UDim2.new(1, 0, 0, 22),
+                    Position = UDim2.new(0, 0, 0, 18),
                     BackgroundColor3 = Evok:GetTheme("ElementBg"),
                     BorderColor3 = Evok:GetTheme("Border"),
                     BorderSizePixel = 1,
                     Text = TxtDefault,
-                    PlaceholderText = TxtPlaceholder,
-                    TextColor3 = Evok:GetTheme("TextMuted"),
-                    PlaceholderColor3 = Evok:GetTheme("Border"),
+                    PlaceholderText = txtConfig.Placeholder or "...",
+                    TextColor3 = Evok:GetTheme("Text"),
                     Font = Enum.Font.Code,
                     TextSize = 12,
                     ClearTextOnFocus = false,
-                    TextXAlignment = Enum.TextXAlignment.Center,
-                    Parent = TxtFrame
+                    Parent = TxtF
                 })
 
-                InputBox.FocusLost:Connect(function(enterPressed)
-                    local currentText = InputBox.Text
-                    
-                    Evok.Flags[TxtFlag].Value = currentText
-                    TxtCallback(currentText)
-                end)
+                Utility:Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = Inp })
 
-                Evok.Flags[TxtFlag] = {
-                    Value = TxtDefault,
-                    Set = function(self, val)
-                        InputBox.Text = val
-                        TxtCallback(val)
-                    end
-                }
+                Inp.FocusLost:Connect(function()
+                    Evok.Flags[TxtFlag] = { Value = Inp.Text }
+                    TxtCallback(Inp.Text)
+                end)
             end
 
             -- ========================================================================
-            -- 20. ELEMENTO: KEYBIND (CAPTURA DE TECLAS)
+            -- 19. ELEMENTO: KEYBIND
             -- ========================================================================
             function Elements:Keybind(keyConfig)
                 local KeyName = keyConfig.Name or "Keybind"
@@ -1431,15 +1676,13 @@ function Evok:Window(config)
                 local CurrentKey = KeyDefault
                 local IsBinding = false
 
-                local KeyFrame = Utility:Create("Frame", {
-                    Name = KeyName .. "_Keybind",
-                    Size = UDim2.new(1, 0, 0, 16),
+                local KeyF = Utility:Create("Frame", {
+                    Size = UDim2.new(1, 0, 0, 20),
                     BackgroundTransparency = 1,
                     Parent = GroupContainer
                 })
 
-                local KeyTitle = Utility:Create("TextLabel", {
-                    Name = "Title",
+                Utility:Create("TextLabel", {
                     Size = UDim2.new(1, -60, 1, 0),
                     BackgroundTransparency = 1,
                     Text = KeyName,
@@ -1447,13 +1690,12 @@ function Evok:Window(config)
                     Font = Enum.Font.Code,
                     TextSize = 12,
                     TextXAlignment = Enum.TextXAlignment.Left,
-                    Parent = KeyFrame
+                    Parent = KeyF
                 })
 
-                local KeyButton = Utility:Create("TextButton", {
-                    Name = "BindButton",
-                    Size = UDim2.new(0, 50, 1, 0),
-                    Position = UDim2.new(1, -50, 0, 0),
+                local KBtn = Utility:Create("TextButton", {
+                    Size = UDim2.new(0, 60, 0, 18),
+                    Position = UDim2.new(1, -60, 0, 1),
                     BackgroundColor3 = Evok:GetTheme("ElementBg"),
                     BorderColor3 = Evok:GetTheme("Border"),
                     BorderSizePixel = 1,
@@ -1462,43 +1704,41 @@ function Evok:Window(config)
                     Font = Enum.Font.Code,
                     TextSize = 11,
                     AutoButtonColor = false,
-                    Parent = KeyFrame
+                    Parent = KeyF
                 })
 
-                KeyButton.MouseButton1Click:Connect(function()
+                Utility:Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = KBtn })
+
+                KBtn.MouseButton1Click:Connect(function()
                     IsBinding = true
-                    KeyButton.Text = "..."
-                    KeyButton.TextColor3 = Evok:GetTheme("Warning")
+                    KBtn.Text = "..."
+                    KBtn.TextColor3 = Evok:GetTheme("Warning")
                 end)
 
-                UserInputService.InputBegan:Connect(function(input, gameProcessed)
-                    if not gameProcessed then
+                UserInputService.InputBegan:Connect(function(input, gp)
+                    if not gp then
                         if IsBinding and input.UserInputType == Enum.UserInputType.Keyboard then
-                            if input.KeyCode == Enum.KeyCode.Escape then
-                                CurrentKey = Enum.KeyCode.Unknown
-                                KeyButton.Text = "NONE"
-                            else
-                                CurrentKey = input.KeyCode
-                                KeyButton.Text = Evok.Keymap[CurrentKey] or CurrentKey.Name
-                            end
-                            
-                            KeyButton.TextColor3 = Evok:GetTheme("Accent")
+                            CurrentKey = (input.KeyCode == Enum.KeyCode.Escape) and Enum.KeyCode.Unknown or input.KeyCode
+                            KBtn.Text = Evok.Keymap[CurrentKey] or CurrentKey.Name
+                            KBtn.TextColor3 = Evok:GetTheme("Accent")
                             IsBinding = false
-                            Evok.Flags[KeyFlag].Value = CurrentKey
+                            Evok.Flags[KeyFlag] = { Value = CurrentKey }
                         elseif not IsBinding and input.KeyCode == CurrentKey and CurrentKey ~= Enum.KeyCode.Unknown then
                             KeyCallback()
                         end
                     end
                 end)
-
-                Evok.Flags[KeyFlag] = {
-                    Value = CurrentKey,
-                    Set = function(self, val)
-                        CurrentKey = val
-                        KeyButton.Text = Evok.Keymap[CurrentKey] or CurrentKey.Name
-                    end
-                }
             end
+
+            return Elements
+        end
+
+        return TabLogic
+    end
+
+    return WindowLogic
+end
+
 -- ========================================================================
 -- FIM PARTE 2
 -- ========================================================================
@@ -1520,7 +1760,7 @@ function Evok:Window(config)
 
                 local CPFrame = Utility:Create("Frame", {
                     Name = CPName .. "_ColorPicker",
-                    Size = UDim2.new(1, 0, 0, 24),
+                    Size = UDim2.new(1, 0, 0, 26),
                     BackgroundTransparency = 1,
                     Parent = GroupContainer
                 })
@@ -1539,8 +1779,8 @@ function Evok:Window(config)
 
                 local CPButton = Utility:Create("TextButton", {
                     Name = "DisplayButton",
-                    Size = UDim2.new(0, 30, 0, 14),
-                    Position = UDim2.new(1, -30, 0.5, -7),
+                    Size = UDim2.new(0, 30, 0, 16),
+                    Position = UDim2.new(1, -30, 0.5, -8),
                     BackgroundColor3 = CPDefault,
                     BorderColor3 = Evok:GetTheme("Border"),
                     BorderSizePixel = 1,
@@ -1549,8 +1789,9 @@ function Evok:Window(config)
                     Parent = CPFrame
                 })
                 
+                -- ARREDONDAMENTO DO BOTÃO DE COR
                 Utility:Create("UICorner", {
-                    CornerRadius = UDim.new(0, 3),
+                    CornerRadius = UDim.new(0, 4),
                     Parent = CPButton
                 })
 
@@ -1563,6 +1804,11 @@ function Evok:Window(config)
                     Visible = false,
                     ZIndex = 50,
                     Parent = GroupContainer
+                })
+                
+                Utility:Create("UICorner", {
+                    CornerRadius = UDim.new(0, 4),
+                    Parent = CPopup
                 })
 
                 local SatValMap = Utility:Create("TextButton", {
@@ -1690,6 +1936,8 @@ function Evok:Window(config)
                     ZIndex = 51,
                     Parent = CPopup
                 })
+                
+                Utility:Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = HexInput })
 
                 local function UpdateColor()
                     local CurrentColor = Evok.ColorSpace:HSVToRGB(Hue, Sat, Val)
@@ -1787,7 +2035,7 @@ function Evok:Window(config)
             end
 
             -- ========================================================================
-            -- 22. ELEMENTO: MULTI-DROPDOWN (MÚLTIPLAS SELEÇÕES)
+            -- 22. ELEMENTO: MULTI-DROPDOWN (CORREÇÃO DO TAMANHO DA CAIXA VAZIA)
             -- ========================================================================
             function Elements:MultiDropdown(multiConfig)
                 local DropName = multiConfig.Name or "Multi Dropdown"
@@ -1805,7 +2053,7 @@ function Evok:Window(config)
 
                 local DropFrame = Utility:Create("Frame", {
                     Name = DropName .. "_MultiDropdown",
-                    Size = UDim2.new(1, 0, 0, 36),
+                    Size = UDim2.new(1, 0, 0, 40),
                     BackgroundTransparency = 1,
                     ClipsDescendants = true,
                     Parent = GroupContainer
@@ -1813,7 +2061,7 @@ function Evok:Window(config)
 
                 local DropTitle = Utility:Create("TextLabel", {
                     Name = "Title",
-                    Size = UDim2.new(1, 0, 0, 14),
+                    Size = UDim2.new(1, 0, 0, 16),
                     BackgroundTransparency = 1,
                     Text = DropName,
                     TextColor3 = Evok:GetTheme("Text"),
@@ -1843,8 +2091,8 @@ function Evok:Window(config)
 
                 local DropButton = Utility:Create("TextButton", {
                     Name = "MainButton",
-                    Size = UDim2.new(1, 0, 0, 20),
-                    Position = UDim2.new(0, 0, 0, 16),
+                    Size = UDim2.new(1, 0, 0, 22),
+                    Position = UDim2.new(0, 0, 0, 18),
                     BackgroundColor3 = Evok:GetTheme("ElementBg"),
                     BorderColor3 = Evok:GetTheme("Border"),
                     BorderSizePixel = 1,
@@ -1856,6 +2104,11 @@ function Evok:Window(config)
                     TextTruncate = Enum.TextTruncate.AtEnd,
                     AutoButtonColor = false,
                     Parent = DropFrame
+                })
+                
+                Utility:Create("UICorner", {
+                    CornerRadius = UDim.new(0, 4),
+                    Parent = DropButton
                 })
 
                 local DropArrow = Utility:Create("TextLabel", {
@@ -1872,8 +2125,8 @@ function Evok:Window(config)
 
                 local DropScroll = Utility:Create("ScrollingFrame", {
                     Name = "OptionsScroll",
-                    Size = UDim2.new(1, -4, 0, 100),
-                    Position = UDim2.new(0, 2, 0, 40),
+                    Size = UDim2.new(1, -4, 0, 0),
+                    Position = UDim2.new(0, 2, 0, 45),
                     BackgroundTransparency = 1,
                     ScrollBarThickness = 2,
                     BorderSizePixel = 0,
@@ -1903,9 +2156,8 @@ function Evok:Window(config)
 
                         local OptBtn = Utility:Create("TextButton", {
                             Name = "Option_" .. option,
-                            Size = UDim2.new(1, 0, 0, 20),
+                            Size = UDim2.new(1, 0, 0, 22),
                             BackgroundColor3 = IsSelected and Evok:GetTheme("Accent") or Evok:GetTheme("GroupboxBg"),
-                            BorderColor3 = Evok:GetTheme("Border"),
                             BorderSizePixel = 0,
                             Text = "  " .. option,
                             TextColor3 = IsSelected and Evok:GetTheme("Background") or Evok:GetTheme("TextMuted"),
@@ -1915,7 +2167,12 @@ function Evok:Window(config)
                             Parent = DropScroll
                         })
                         
-                        TotalY = TotalY + 22
+                        Utility:Create("UICorner", {
+                            CornerRadius = UDim.new(0, 4),
+                            Parent = OptBtn
+                        })
+                        
+                        TotalY = TotalY + 24
                         table.insert(OptionButtons, OptBtn)
 
                         OptBtn.MouseButton1Click:Connect(function()
@@ -1945,20 +2202,35 @@ function Evok:Window(config)
                     end
                     
                     DropScroll.CanvasSize = UDim2.new(0, 0, 0, TotalY)
+                    return TotalY
                 end
 
                 DropButton.MouseButton1Click:Connect(function()
                     IsOpen = not IsOpen
                     if IsOpen then
-                        BuildOptions()
+                        local listHeight = BuildOptions()
+                        
+                        -- CÁLCULO EXATO PARA NÃO SOBRAR ESPAÇO VAZIO
+                        local finalSize = math.clamp(listHeight, 40, 150)
+                        
                         Evok.Tween(DropFrame, {
-                            Size = UDim2.new(1, 0, 0, 145)
+                            Size = UDim2.new(1, 0, 0, finalSize + 45)
                         }, 0.2)
+                        
+                        Evok.Tween(DropScroll, {
+                            Size = UDim2.new(1, -4, 0, finalSize)
+                        }, 0.2)
+                        
                         DropArrow.Text = "▲"
                     else
                         Evok.Tween(DropFrame, {
-                            Size = UDim2.new(1, 0, 0, 36)
+                            Size = UDim2.new(1, 0, 0, 40)
                         }, 0.2)
+                        
+                        Evok.Tween(DropScroll, {
+                            Size = UDim2.new(1, -4, 0, 0)
+                        }, 0.2)
+                        
                         DropArrow.Text = "▼"
                     end
                 end)
@@ -1987,7 +2259,7 @@ function Evok:Window(config)
 end
 
 -- ========================================================================
--- 23. SISTEMA DE NOTIFICAÇÕES (COM BARRA DE PROGRESSO ANIMADA)
+-- 23. SISTEMA DE NOTIFICAÇÕES (COM BARRA DE PROGRESSO E CANTOS REDONDOS)
 -- ========================================================================
 function Evok:Notify(config)
     local notifTitle = config.Title or "Evok Ultimate"
@@ -2032,6 +2304,11 @@ function Evok:Notify(config)
         ClipsDescendants = true,
         Parent = self.Registry.NotifyContainer
     })
+    
+    Utility:Create("UICorner", {
+        CornerRadius = UDim.new(0, 6),
+        Parent = NotifFrame
+    })
 
     local NTitle = Utility:Create("TextLabel", {
         Name = "Title",
@@ -2062,11 +2339,11 @@ function Evok:Notify(config)
         Parent = NotifFrame
     })
 
-    -- Barra de Progresso do Tempo
+    -- Barra de Progresso
     local ProgressBarBG = Utility:Create("Frame", {
         Name = "ProgressBG",
-        Size = UDim2.new(1, 0, 0, 2),
-        Position = UDim2.new(0, 0, 1, -2),
+        Size = UDim2.new(1, 0, 0, 3),
+        Position = UDim2.new(0, 0, 1, -3),
         BackgroundColor3 = self:GetTheme("Background"),
         BorderSizePixel = 0,
         BackgroundTransparency = 1,
@@ -2131,7 +2408,7 @@ function Evok:SetWatermark(config)
     if not self.Registry.WatermarkFrame then
         local WMFrame = Utility:Create("Frame", {
             Name = "Evok_Watermark",
-            Size = UDim2.new(0, 200, 0, 25),
+            Size = UDim2.new(0, 200, 0, 28),
             Position = UDim2.new(0, 15, 0, 15),
             BackgroundColor3 = self:GetTheme("Background"),
             BorderColor3 = self:GetTheme("Border"),
@@ -2139,6 +2416,11 @@ function Evok:SetWatermark(config)
             Visible = false,
             ZIndex = 100,
             Parent = EvokGui
+        })
+        
+        Utility:Create("UICorner", {
+            CornerRadius = UDim.new(0, 6),
+            Parent = WMFrame
         })
         
         local WMInnerBorder = Utility:Create("UIStroke", {
@@ -2208,12 +2490,15 @@ function Evok:SetWatermark(config)
                 Vector2.new(1000, 25)
             ).X
             
-            self.Registry.WatermarkFrame.Size = UDim2.new(0, TextWidth + 20, 0, 25)
+            self.Registry.WatermarkFrame.Size = UDim2.new(0, TextWidth + 20, 0, 28)
         end))
     end
     
     self.Registry.WatermarkFrame.Visible = wmVisible
 end
+
+return Evok
+
 -- ========================================================================
 -- FIM PARTE 3
 -- ========================================================================
