@@ -1,14 +1,15 @@
 --[[
     ===========================================================================
-    EVOK UI LIBRARY - PARTE 1: CORE ENGINE (MASSIVE EDITION)
+    EVOK UI LIBRARY - PARTE 1: CORE ENGINE (MASSIVE & FIXED EDITION)
     ===========================================================================
     Motor principal com arquitetura expandida, 30 equações de easing, 
     10 temas embutidos e utilitários matemáticos de cor.
+    Renderização fixada para Sibling (Sem bug de sobreposição).
     ===========================================================================
 ]]
 
 local Evok = {
-    Version = "1.0.2-PRO-MASSIVE",
+    Version = "1.0.3-PRO-MASSIVE",
     Flags = {},
     Connections = {},
     Instances = {},
@@ -224,7 +225,6 @@ function Evok.ThemeManager:GetColor(ColorName)
     if theme and theme[ColorName] then
         return theme[ColorName]
     end
-    -- Fallback de segurança para não dar nil
     return Color3.new(1, 1, 1)
 end
 
@@ -354,35 +354,28 @@ end
 -- ============================================================================
 -- 5. THE ULTIMATE EASING ENGINE
 -- ============================================================================
--- Todas as equações de interpolação possíveis mapeadas matematicamente.
 Evok.Easing = {}
 
--- Sine
 function Evok.Easing.SineIn(t) return 1 - math.cos(t * (math.pi / 2)) end
 function Evok.Easing.SineOut(t) return math.sin(t * (math.pi / 2)) end
 function Evok.Easing.SineInOut(t) return -0.5 * (math.cos(math.pi * t) - 1) end
 
--- Quad
 function Evok.Easing.QuadIn(t) return t * t end
 function Evok.Easing.QuadOut(t) return t * (2 - t) end
 function Evok.Easing.QuadInOut(t) return t < 0.5 and 2 * t * t or -1 + (4 - 2 * t) * t end
 
--- Cubic
 function Evok.Easing.CubicIn(t) return t * t * t end
 function Evok.Easing.CubicOut(t) t = t - 1 return t * t * t + 1 end
 function Evok.Easing.CubicInOut(t) return t < 0.5 and 4 * t * t * t or (t - 1) * (2 * t - 2) * (2 * t - 2) + 1 end
 
--- Quart
 function Evok.Easing.QuartIn(t) return t * t * t * t end
 function Evok.Easing.QuartOut(t) t = t - 1 return 1 - (t * t * t * t) end
 function Evok.Easing.QuartInOut(t) return t < 0.5 and 8 * t * t * t * t or 1 - 8 * (t - 1) * (t - 1) * (t - 1) * (t - 1) end
 
--- Quint
 function Evok.Easing.QuintIn(t) return t * t * t * t * t end
 function Evok.Easing.QuintOut(t) t = t - 1 return 1 + (t * t * t * t * t) end
 function Evok.Easing.QuintInOut(t) return t < 0.5 and 16 * t * t * t * t * t or 1 + 16 * (t - 1) * (t - 1) * (t - 1) * (t - 1) * (t - 1) end
 
--- Expo
 function Evok.Easing.ExpoIn(t) return t == 0 and 0 or math.pow(2, 10 * (t - 1)) end
 function Evok.Easing.ExpoOut(t) return t == 1 and 1 or 1 - math.pow(2, -10 * t) end
 function Evok.Easing.ExpoInOut(t) 
@@ -392,7 +385,6 @@ function Evok.Easing.ExpoInOut(t)
     return 0.5 * (2 - math.pow(2, -10 * (2 * t - 1)))
 end
 
--- Circ
 function Evok.Easing.CircIn(t) return 1 - math.sqrt(1 - (t * t)) end
 function Evok.Easing.CircOut(t) t = t - 1 return math.sqrt(1 - (t * t)) end
 function Evok.Easing.CircInOut(t)
@@ -400,7 +392,6 @@ function Evok.Easing.CircInOut(t)
     t = t * 2 - 2 return 0.5 * (math.sqrt(1 - (t * t)) + 1)
 end
 
--- Back
 function Evok.Easing.BackIn(t) local s = 1.70158 return t * t * ((s + 1) * t - s) end
 function Evok.Easing.BackOut(t) local s = 1.70158 t = t - 1 return (t * t * ((s + 1) * t + s) + 1) end
 function Evok.Easing.BackInOut(t)
@@ -413,7 +404,6 @@ function Evok.Easing.BackInOut(t)
     return 0.5 * (t * t * ((s + 1) * t + s) + 2)
 end
 
--- Elastic
 function Evok.Easing.ElasticIn(t)
     if t == 0 then return 0 end
     if t == 1 then return 1 end
@@ -430,7 +420,6 @@ function Evok.Easing.ElasticOut(t)
     return math.pow(2, -10 * t) * math.sin((t - s) * (2 * math.pi) / p) + 1
 end
 
--- Bounce
 function Evok.Easing.BounceOut(t)
     if t < (1 / 2.75) then return 7.5625 * t * t end
     if t < (2 / 2.75) then t = t - (1.5 / 2.75) return 7.5625 * t * t + 0.75 end
@@ -440,7 +429,7 @@ end
 function Evok.Easing.BounceIn(t) return 1 - Evok.Easing.BounceOut(1 - t) end
 
 -- ============================================================================
--- 6. NOTIFICATION SYSTEM (EXPANDIDO)
+-- 6. NOTIFICATION SYSTEM 
 -- ============================================================================
 Evok.NotificationEngine = {
     Container = nil
@@ -451,7 +440,7 @@ function Evok:Notify(Config)
         local Screen = self.Utility.Instance:Create("ScreenGui", {
             Name = "Evok_Notifications",
             Parent = ParentGui,
-            ZIndexBehavior = Enum.ZIndexBehavior.Global,
+            ZIndexBehavior = Enum.ZIndexBehavior.Sibling, -- CORRIGIDO PARA SIBLING
             ResetOnSpawn = false
         })
         self.NotificationEngine.Container = self.Utility.Instance:Create("Frame", {
@@ -553,7 +542,7 @@ function Evok:CreateWatermark(Text)
     local Screen = self.Utility.Instance:Create("ScreenGui", {
         Name = "Evok_Watermark_Pro",
         Parent = ParentGui,
-        ZIndexBehavior = Enum.ZIndexBehavior.Global,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling, -- CORRIGIDO PARA SIBLING
         IgnoreGuiInset = true,
         ResetOnSpawn = false
     })
@@ -649,7 +638,7 @@ function Evok:CreateWindow(Config)
     local MainGui = self.Utility.Instance:Create("ScreenGui", {
         Name = "Evok_Main_Interface",
         Parent = ParentGui,
-        ZIndexBehavior = Enum.ZIndexBehavior.Global,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling, -- FIX: ISSO RESOLVE A TELA PRETA
         ResetOnSpawn = false,
         IgnoreGuiInset = true
     })
@@ -683,16 +672,15 @@ function Evok:CreateWindow(Config)
         ImageTransparency = 0.5,
         SliceCenter = Rect.new(49, 49, 450, 450),
         ScaleType = Enum.ScaleType.Slice,
-        ZIndex = -1
+        ZIndex = 0
     })
 
     local Header = self.Utility.Instance:Create("Frame", {
         Name = "Header",
         Parent = RootFrame,
         Size = UDim2.new(1, 0, 0, 35),
-        BackgroundColor3 = self.ThemeManager:GetColor("Background"),
-        BorderSizePixel = 0,
-        ZIndex = 2
+        BackgroundColor3 = self.ThemeManager:GetColor("Container"), -- Levemente mais claro
+        BorderSizePixel = 0
     })
 
     local HeaderIcon = self.Utility.Instance:Create("ImageLabel", {
@@ -759,7 +747,7 @@ function Evok:CreateWindow(Config)
     Window.Pages = PagesContainer
 
     -- ============================================================================
-    -- 9. SISTEMA DE ARRASTE SUAVE E COMPATIBILIDADE MOBILE
+    -- 9. SISTEMA DE ARRASTE SUAVE
     -- ============================================================================
     local DragInput, DragStart, StartPos
     
@@ -824,5 +812,3 @@ function Evok:CreateWindow(Config)
 end
 
 return Evok
-
--- FIM DA PARTE 1
