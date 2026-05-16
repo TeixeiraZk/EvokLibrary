@@ -1,7 +1,7 @@
 -- ==============================================================================
 -- 🎨 EVOK UI LIBRARY - PART 1: CORE ENGINE (Core.lua)
--- Version: 1.1.0 | Developer: Senior UI/UX Engineer (Evok)
--- Build: Enterprise Scale (800+ Lines)
+-- Version: 2.0.0 | Developer: Senior UI/UX Engineer (Evok)
+-- Design: Sidebar Layout | 800x500 Resolution | Dark/Neon Purple
 -- ==============================================================================
 
 local CoreGui = game:GetService("CoreGui")
@@ -17,12 +17,12 @@ local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
 -- ==============================================================================
--- 📐 TIPAGEM ESTREITA (LUAU TYPES)
+-- 📐 LUAU TYPES (Strict Typing)
 -- ==============================================================================
 export type ColorTheme = {
     Background: Color3,
+    Sidebar: Color3,
     Container: Color3,
-    TopBar: Color3,
     Accent: Color3,
     Text: Color3,
     TextMuted: Color3,
@@ -36,36 +36,32 @@ export type ColorTheme = {
 export type EvokCore = {
     Themes: ColorTheme,
     ThemeListeners: {any},
-    Easing: any,
-    Math: any,
-    Logger: any,
-    Cursor: any,
-    Tooltip: any,
-    GUI: ScreenGui?,
     ActiveNotifications: {any},
+    Connections: {any},
+    GUI: ScreenGui?,
+    WatermarkActive: boolean,
+    DebugMode: boolean,
     CreateWindow: (self: EvokCore, config: any) -> any,
     Notify: (self: EvokCore, config: any) -> void,
 }
 
--- ==============================================================================
--- ⚙️ INSTÂNCIA GLOBAL DO CORE
--- ==============================================================================
 local Core: EvokCore = {
     Themes = {
-        Background = Color3.fromRGB(15, 15, 15),
-        Container = Color3.fromRGB(22, 22, 22),
-        TopBar = Color3.fromRGB(18, 18, 18),
-        Accent = Color3.fromRGB(180, 0, 255),
-        Text = Color3.fromRGB(255, 255, 255),
-        TextMuted = Color3.fromRGB(130, 130, 130),
-        Border = Color3.fromRGB(35, 35, 35),
-        NotificationBg = Color3.fromRGB(25, 25, 25),
-        Success = Color3.fromRGB(0, 255, 100),
-        Warning = Color3.fromRGB(255, 180, 0),
-        Error = Color3.fromRGB(255, 50, 50)
+        Background = Color3.fromRGB(15, 15, 15),     -- Fundo principal (Direita)
+        Sidebar = Color3.fromRGB(20, 20, 20),        -- Menu lateral (Esquerda)
+        Container = Color3.fromRGB(25, 25, 25),      -- Fundo de seções/widgets
+        Accent = Color3.fromRGB(180, 0, 255),        -- Roxo Neon
+        Text = Color3.fromRGB(255, 255, 255),        -- Texto principal
+        TextMuted = Color3.fromRGB(130, 130, 130),   -- Texto secundário
+        Border = Color3.fromRGB(35, 35, 35),         -- Bordas gerais
+        NotificationBg = Color3.fromRGB(22, 22, 22),
+        Success = Color3.fromRGB(46, 204, 113),
+        Warning = Color3.fromRGB(241, 196, 15),
+        Error = Color3.fromRGB(231, 76, 60)
     },
     ThemeListeners = {},
     ActiveNotifications = {},
+    Connections = {},
     GUI = nil,
     WatermarkActive = false,
     DebugMode = true
@@ -78,15 +74,11 @@ Core.__index = Core
 Core.Logger = {}
 
 function Core.Logger:Log(msg: string)
-    if Core.DebugMode then
-        print(string.format("[Evok UI - LOG] %s", tostring(msg)))
-    end
+    if Core.DebugMode then print(string.format("[Evok UI - LOG] %s", tostring(msg))) end
 end
 
 function Core.Logger:Warn(msg: string)
-    if Core.DebugMode then
-        warn(string.format("[Evok UI - WARN] %s", tostring(msg)))
-    end
+    if Core.DebugMode then warn(string.format("[Evok UI - WARN] %s", tostring(msg))) end
 end
 
 function Core.Logger:Error(msg: string)
@@ -98,7 +90,6 @@ end
 -- ==============================================================================
 Core.Math = { Color = {} }
 
--- Converte Color3 para Hex (Ex: #FFFFFF)
 function Core.Math.Color.ToHex(color: Color3): string
     local r = math.floor(color.R * 255 + 0.5)
     local g = math.floor(color.G * 255 + 0.5)
@@ -106,7 +97,6 @@ function Core.Math.Color.ToHex(color: Color3): string
     return string.format("#%02X%02X%02X", r, g, b)
 end
 
--- Converte Hex para Color3
 function Core.Math.Color.FromHex(hex: string): Color3
     hex = hex:gsub("#", "")
     local r = tonumber(hex:sub(1, 2), 16) or 255
@@ -115,21 +105,22 @@ function Core.Math.Color.FromHex(hex: string): Color3
     return Color3.fromRGB(r, g, b)
 end
 
--- Inversão de Cor (Contraste)
 function Core.Math.Color.Invert(color: Color3): Color3
     return Color3.new(1 - color.R, 1 - color.G, 1 - color.B)
 end
 
--- Escurece a cor
 function Core.Math.Color.Darken(color: Color3, amount: number): Color3
     local h, s, v = color:ToHSV()
     return Color3.fromHSV(h, s, math.clamp(v - amount, 0, 1))
 end
 
--- Clareia a cor
 function Core.Math.Color.Lighten(color: Color3, amount: number): Color3
     local h, s, v = color:ToHSV()
     return Color3.fromHSV(h, s, math.clamp(v + amount, 0, 1))
+end
+
+function Core.Math.Color.GetLuminance(color: Color3): number
+    return 0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B
 end
 
 function Core.Math.Map(val, inMin, inMax, outMin, outMax)
@@ -141,74 +132,56 @@ function Core.Math.Lerp(a, b, t)
 end
 
 -- ==============================================================================
--- 🧮 EASING ENGINE (PENNER EQUATIONS)
+-- 🧮 CUSTOM EASING ENGINE (33 Penner Equations)
+-- Substitui a limitação do TweenService nativo para animações frame-a-frame
 -- ==============================================================================
 Core.Easing = {}
 
+-- Linear
 function Core.Easing.Linear(t, b, c, d) return c * t / d + b end
+
+-- Sine
 function Core.Easing.InSine(t, b, c, d) return -c * math.cos(t / d * (math.pi / 2)) + c + b end
 function Core.Easing.OutSine(t, b, c, d) return c * math.sin(t / d * (math.pi / 2)) + b end
 function Core.Easing.InOutSine(t, b, c, d) return -c / 2 * (math.cos(math.pi * t / d) - 1) + b end
 
-function Core.Easing.InQuad(t, b, c, d)
-    t = t / d
-    return c * math.pow(t, 2) + b
-end
-function Core.Easing.OutQuad(t, b, c, d)
-    t = t / d
-    return -c * t * (t - 2) + b
-end
+-- Quad
+function Core.Easing.InQuad(t, b, c, d) t = t / d; return c * math.pow(t, 2) + b end
+function Core.Easing.OutQuad(t, b, c, d) t = t / d; return -c * t * (t - 2) + b end
 function Core.Easing.InOutQuad(t, b, c, d)
     t = t / d * 2
     if t < 1 then return c / 2 * math.pow(t, 2) + b end
     return -c / 2 * ((t - 1) * (t - 3) - 1) + b
 end
 
-function Core.Easing.InCubic(t, b, c, d)
-    t = t / d
-    return c * math.pow(t, 3) + b
-end
-function Core.Easing.OutCubic(t, b, c, d)
-    t = t / d - 1
-    return c * (math.pow(t, 3) + 1) + b
-end
+-- Cubic
+function Core.Easing.InCubic(t, b, c, d) t = t / d; return c * math.pow(t, 3) + b end
+function Core.Easing.OutCubic(t, b, c, d) t = t / d - 1; return c * (math.pow(t, 3) + 1) + b end
 function Core.Easing.InOutCubic(t, b, c, d)
     t = t / d * 2
     if t < 1 then return c / 2 * t * t * t + b end
-    t = t - 2
-    return c / 2 * (t * t * t + 2) + b
+    t = t - 2; return c / 2 * (t * t * t + 2) + b
 end
 
-function Core.Easing.InQuart(t, b, c, d)
-    t = t / d
-    return c * math.pow(t, 4) + b
-end
-function Core.Easing.OutQuart(t, b, c, d)
-    t = t / d - 1
-    return -c * (math.pow(t, 4) - 1) + b
-end
+-- Quart
+function Core.Easing.InQuart(t, b, c, d) t = t / d; return c * math.pow(t, 4) + b end
+function Core.Easing.OutQuart(t, b, c, d) t = t / d - 1; return -c * (math.pow(t, 4) - 1) + b end
 function Core.Easing.InOutQuart(t, b, c, d)
     t = t / d * 2
     if t < 1 then return c / 2 * math.pow(t, 4) + b end
-    t = t - 2
-    return -c / 2 * (math.pow(t, 4) - 2) + b
+    t = t - 2; return -c / 2 * (math.pow(t, 4) - 2) + b
 end
 
-function Core.Easing.InQuint(t, b, c, d)
-    t = t / d
-    return c * math.pow(t, 5) + b
-end
-function Core.Easing.OutQuint(t, b, c, d)
-    t = t / d - 1
-    return c * (math.pow(t, 5) + 1) + b
-end
+-- Quint
+function Core.Easing.InQuint(t, b, c, d) t = t / d; return c * math.pow(t, 5) + b end
+function Core.Easing.OutQuint(t, b, c, d) t = t / d - 1; return c * (math.pow(t, 5) + 1) + b end
 function Core.Easing.InOutQuint(t, b, c, d)
     t = t / d * 2
     if t < 1 then return c / 2 * math.pow(t, 5) + b end
-    t = t - 2
-    return c / 2 * (math.pow(t, 5) + 2) + b
+    t = t - 2; return c / 2 * (math.pow(t, 5) + 2) + b
 end
 
+-- Expo
 function Core.Easing.InExpo(t, b, c, d)
     if t == 0 then return b end
     return c * math.pow(2, 10 * (t / d - 1)) + b - c * 0.001
@@ -225,27 +198,59 @@ function Core.Easing.InOutExpo(t, b, c, d)
     return c / 2 * 1.0005 * (-math.pow(2, -10 * (t - 1)) + 2) + b
 end
 
+-- Circ
+function Core.Easing.InCirc(t, b, c, d) t = t / d; return -c * (math.sqrt(1 - t * t) - 1) + b end
+function Core.Easing.OutCirc(t, b, c, d) t = t / d - 1; return c * math.sqrt(1 - t * t) + b end
+function Core.Easing.InOutCirc(t, b, c, d)
+    t = t / d * 2
+    if t < 1 then return -c / 2 * (math.sqrt(1 - t * t) - 1) + b end
+    t = t - 2; return c / 2 * (math.sqrt(1 - t * t) + 1) + b
+end
+
+-- Back
+function Core.Easing.InBack(t, b, c, d, s)
+    if not s then s = 1.70158 end
+    t = t / d; return c * t * t * ((s + 1) * t - s) + b
+end
 function Core.Easing.OutBack(t, b, c, d, s)
     if not s then s = 1.70158 end
-    t = t / d - 1
-    return c * (t * t * ((s + 1) * t + s) + 1) + b
+    t = t / d - 1; return c * (t * t * ((s + 1) * t + s) + 1) + b
+end
+function Core.Easing.InOutBack(t, b, c, d, s)
+    if not s then s = 1.70158 end
+    s = s * 1.525
+    t = t / d * 2
+    if t < 1 then return c / 2 * (t * t * ((s + 1) * t - s)) + b end
+    t = t - 2; return c / 2 * (t * t * ((s + 1) * t + s) + 2) + b
+end
+
+-- Bounce
+function Core.Easing.OutBounce(t, b, c, d)
+    t = t / d
+    if t < (1 / 2.75) then return c * (7.5625 * t * t) + b
+    elseif t < (2 / 2.75) then t = t - (1.5 / 2.75); return c * (7.5625 * t * t + 0.75) + b
+    elseif t < (2.5 / 2.75) then t = t - (2.25 / 2.75); return c * (7.5625 * t * t + 0.9375) + b
+    else t = t - (2.625 / 2.75); return c * (7.5625 * t * t + 0.984375) + b end
+end
+function Core.Easing.InBounce(t, b, c, d) return c - Core.Easing.OutBounce(d - t, 0, c, d) + b end
+function Core.Easing.InOutBounce(t, b, c, d)
+    if t < d / 2 then return Core.Easing.InBounce(t * 2, 0, c, d) * 0.5 + b end
+    return Core.Easing.OutBounce(t * 2 - d, 0, c, d) * 0.5 + c * 0.5 + b
 end
 
 -- ==============================================================================
 -- 🎨 THEME MANAGER (Reatividade Completa)
 -- ==============================================================================
 function Core:SetTheme(themeName: string, newAccent: Color3?)
-    if newAccent then
-        self.Themes.Accent = newAccent
-    end
+    if newAccent then self.Themes.Accent = newAccent end
     
     for _, listener in pairs(self.ThemeListeners) do
         if type(listener) == "function" then
             local success, err = pcall(listener, self.Themes)
-            if not success then Core.Logger:Warn("Failed to update theme listener: " .. tostring(err)) end
+            if not success then Core.Logger:Warn("Theme update failed: " .. tostring(err)) end
         end
     end
-    Core.Logger:Log("Theme updated successfully.")
+    Core.Logger:Log("Theme Engine Synchronized.")
 end
 
 function Core:SubscribeToTheme(callback: (theme: ColorTheme) -> void)
@@ -267,6 +272,7 @@ function Core:Tween(instance: Instance, properties: table, duration: number?, st
     return tween
 end
 
+-- Física de Dragging Premium (Arrasto Suave com Momentum)
 function Core:MakeDraggable(dragArea: Instance, target: Instance, dragSpeed: number?)
     dragSpeed = dragSpeed or 0.16
     local dragging = false
@@ -313,11 +319,7 @@ end
 -- ==============================================================================
 -- 🖱️ CUSTOM CURSOR ENGINE
 -- ==============================================================================
-Core.Cursor = {
-    Enabled = false,
-    Instance = nil,
-    Trail = nil
-}
+Core.Cursor = { Enabled = false, Instance = nil }
 
 function Core:EnableCustomCursor()
     if self.Cursor.Enabled or not self.GUI then return end
@@ -331,31 +333,25 @@ function Core:EnableCustomCursor()
     CursorFrame.ZIndex = 9999
     CursorFrame.Parent = self.GUI
 
-    local UICorner = Instance.new("UICorner")
-    UICorner.CornerRadius = UDim.new(1, 0)
-    UICorner.Parent = CursorFrame
-
-    local UIStroke = Instance.new("UIStroke")
-    UIStroke.Color = Color3.fromRGB(0, 0, 0)
-    UIStroke.Thickness = 1
-    UIStroke.Parent = CursorFrame
+    Instance.new("UICorner", CursorFrame).CornerRadius = UDim.new(1, 0)
+    
+    local CursorStroke = Instance.new("UIStroke", CursorFrame)
+    CursorStroke.Color = Color3.fromRGB(0, 0, 0)
+    CursorStroke.Thickness = 1
 
     self.Cursor.Instance = CursorFrame
 
     self:SubscribeToTheme(function(theme)
-        if self.Cursor.Instance then
-            self.Cursor.Instance.BackgroundColor3 = theme.Accent
-        end
+        if self.Cursor.Instance then self.Cursor.Instance.BackgroundColor3 = theme.Accent end
     end)
 
     RunService.RenderStepped:Connect(function()
         if self.Cursor.Enabled and self.Cursor.Instance then
             local mouseLoc = UserInputService:GetMouseLocation()
-            self.Cursor.Instance.Position = UDim2.new(0, mouseLoc.X, 0, mouseLoc.Y - 36) -- Offset padrão da gui topbar
+            self.Cursor.Instance.Position = UDim2.new(0, mouseLoc.X, 0, mouseLoc.Y - 36) 
         end
     end)
 
-    -- Efeito de Clique no Cursor
     UserInputService.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 and self.Cursor.Enabled then
             self:Tween(CursorFrame, {Size = UDim2.new(0, 5, 0, 5)}, 0.1)
@@ -366,17 +362,12 @@ function Core:EnableCustomCursor()
             self:Tween(CursorFrame, {Size = UDim2.new(0, 8, 0, 8)}, 0.1)
         end
     end)
-    
-    Core.Logger:Log("Custom Cursor Enabled")
 end
 
 -- ==============================================================================
--- 💬 TOOLTIP ENGINE (HOVER MANAGER)
+-- 💬 TOOLTIP ENGINE (Hover Manager)
 -- ==============================================================================
-Core.Tooltip = {
-    Instance = nil,
-    Active = false
-}
+Core.Tooltip = { Instance = nil, Active = false }
 
 function Core:InitTooltip()
     if self.Tooltip.Instance or not self.GUI then return end
@@ -390,18 +381,13 @@ function Core:InitTooltip()
     TooltipFrame.ZIndex = 9990
     TooltipFrame.Parent = self.GUI
 
-    local TCorner = Instance.new("UICorner")
-    TCorner.CornerRadius = UDim.new(0, 4)
-    TCorner.Parent = TooltipFrame
-
-    local TStroke = Instance.new("UIStroke")
+    Instance.new("UICorner", TooltipFrame).CornerRadius = UDim.new(0, 4)
+    local TStroke = Instance.new("UIStroke", TooltipFrame)
     TStroke.Color = self.Themes.Border
-    TStroke.Parent = TooltipFrame
 
-    local TPadding = Instance.new("UIPadding")
+    local TPadding = Instance.new("UIPadding", TooltipFrame)
     TPadding.PaddingLeft = UDim.new(0, 8)
     TPadding.PaddingRight = UDim.new(0, 8)
-    TPadding.Parent = TooltipFrame
 
     local TLabel = Instance.new("TextLabel")
     TLabel.Size = UDim2.new(1, 0, 1, 0)
@@ -461,22 +447,17 @@ function Core:CreateWatermark(text: string)
     WatermarkFrame.Size = UDim2.new(0, 0, 0, 30)
     WatermarkFrame.AutomaticSize = Enum.AutomaticSize.X
     WatermarkFrame.Position = UDim2.new(0, 15, 0, 15)
-    WatermarkFrame.BackgroundColor3 = self.Themes.TopBar
+    WatermarkFrame.BackgroundColor3 = self.Themes.Sidebar
     WatermarkFrame.Parent = self.GUI
 
-    local WMCorner = Instance.new("UICorner")
-    WMCorner.CornerRadius = UDim.new(0, 6)
-    WMCorner.Parent = WatermarkFrame
-
-    local WMStroke = Instance.new("UIStroke")
+    Instance.new("UICorner", WatermarkFrame).CornerRadius = UDim.new(0, 6)
+    local WMStroke = Instance.new("UIStroke", WatermarkFrame)
     WMStroke.Color = self.Themes.Accent
     WMStroke.Thickness = 1
-    WMStroke.Parent = WatermarkFrame
 
-    local WMPadding = Instance.new("UIPadding")
+    local WMPadding = Instance.new("UIPadding", WatermarkFrame)
     WMPadding.PaddingLeft = UDim.new(0, 10)
     WMPadding.PaddingRight = UDim.new(0, 10)
-    WMPadding.Parent = WatermarkFrame
 
     local WMLabel = Instance.new("TextLabel")
     WMLabel.Size = UDim2.new(1, 0, 1, 0)
@@ -491,7 +472,7 @@ function Core:CreateWatermark(text: string)
 
     self:SubscribeToTheme(function(theme)
         WMStroke.Color = theme.Accent
-        WatermarkFrame.BackgroundColor3 = theme.TopBar
+        WatermarkFrame.BackgroundColor3 = theme.Sidebar
         WMLabel.TextColor3 = theme.Text
     end)
 
@@ -508,8 +489,8 @@ function Core:CreateWatermark(text: string)
             
             local ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
             local memory = math.floor(Stats:GetTotalMemoryUsageMb())
-            
             local accentHex = Core.Math.Color.ToHex(self.Themes.Accent)
+            
             WMLabel.Text = string.format(
                 "<font color='%s'>%s</font> | %s FPS | %s ms | %s MB",
                 accentHex, text, tostring(fps), tostring(ping), tostring(memory)
@@ -518,11 +499,10 @@ function Core:CreateWatermark(text: string)
     end)
     
     self:MakeDraggable(WatermarkFrame, WatermarkFrame)
-    Core.Logger:Log("Watermark Initialized")
 end
 
 -- ==============================================================================
--- 🔔 NOTIFICATION SYSTEM
+-- 🔔 NOTIFICATION SYSTEM (Toasts)
 -- ==============================================================================
 function Core:InitNotificationSystem()
     local NotifyContainer = Instance.new("Frame")
@@ -545,7 +525,7 @@ function Core:Notify(config)
     if not self.NotifyContainer then self:InitNotificationSystem() end
 
     local title = config.Title or "Notification"
-    local text = config.Text or "This is a notification."
+    local text = config.Text or "System Message"
     local duration = config.Duration or 5
     local nType = config.Type or "Info" 
 
@@ -561,29 +541,22 @@ function Core:Notify(config)
     NotifFrame.BackgroundColor3 = self.Themes.NotificationBg
     NotifFrame.Parent = self.NotifyContainer
 
-    local NCorner = Instance.new("UICorner")
-    NCorner.CornerRadius = UDim.new(0, 6)
-    NCorner.Parent = NotifFrame
-    
-    local NStroke = Instance.new("UIStroke")
+    Instance.new("UICorner", NotifFrame).CornerRadius = UDim.new(0, 6)
+    local NStroke = Instance.new("UIStroke", NotifFrame)
     NStroke.Color = self.Themes.Border
-    NStroke.Parent = NotifFrame
 
     local SideBar = Instance.new("Frame")
     SideBar.Size = UDim2.new(0, 4, 1, 0)
     SideBar.BackgroundColor3 = sideColor
     SideBar.BorderSizePixel = 0
     SideBar.Parent = NotifFrame
-    local SideCorner = Instance.new("UICorner")
-    SideCorner.CornerRadius = UDim.new(0, 6)
-    SideCorner.Parent = SideBar
+    Instance.new("UICorner", SideBar).CornerRadius = UDim.new(0, 6)
 
-    local NPadding = Instance.new("UIPadding")
+    local NPadding = Instance.new("UIPadding", NotifFrame)
     NPadding.PaddingTop = UDim.new(0, 12)
     NPadding.PaddingBottom = UDim.new(0, 15)
     NPadding.PaddingLeft = UDim.new(0, 15)
     NPadding.PaddingRight = UDim.new(0, 15)
-    NPadding.Parent = NotifFrame
 
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Size = UDim2.new(1, -10, 0, 16)
@@ -615,18 +588,14 @@ function Core:Notify(config)
     TimeBarBg.BackgroundColor3 = self.Themes.Border
     TimeBarBg.BorderSizePixel = 0
     TimeBarBg.Parent = NotifFrame
-    local TimeBarCorner = Instance.new("UICorner")
-    TimeBarCorner.CornerRadius = UDim.new(0, 4)
-    TimeBarCorner.Parent = TimeBarBg
+    Instance.new("UICorner", TimeBarBg).CornerRadius = UDim.new(0, 4)
 
     local TimeBarFill = Instance.new("Frame")
     TimeBarFill.Size = UDim2.new(1, 0, 1, 0)
     TimeBarFill.BackgroundColor3 = sideColor
     TimeBarFill.BorderSizePixel = 0
     TimeBarFill.Parent = TimeBarBg
-    local TimeFillCorner = Instance.new("UICorner")
-    TimeFillCorner.CornerRadius = UDim.new(0, 4)
-    TimeFillCorner.Parent = TimeBarFill
+    Instance.new("UICorner", TimeBarFill).CornerRadius = UDim.new(0, 4)
 
     self:Tween(NotifFrame, {Position = UDim2.new(0, 0, 0, 0)}, 0.4, Enum.EasingStyle.Back)
     local barTween = self:Tween(TimeBarFill, {Size = UDim2.new(0, 0, 1, 0)}, duration, Enum.EasingStyle.Linear)
@@ -653,13 +622,13 @@ function Core:Notify(config)
 end
 
 -- ==============================================================================
--- 🖼️ WINDOW MANAGER (BUILDER ENGINE)
+-- 🖼️ WINDOW MANAGER (BUILDER ENGINE - SIDEBAR 800x500)
 -- ==============================================================================
 function Core:CreateWindow(config)
-    Core.Logger:Log("Initializing Window Manager...")
+    Core.Logger:Log("Initializing Sidebar Window Manager...")
     
     local title = config.Title or "Evok - Zynn Love you <3"
-    local size = config.Size or UDim2.new(0, 650, 0, 450)
+    local size = config.Size or UDim2.new(0, 800, 0, 500) 
     
     local targetGui
     if pcall(function() return CoreGui.Name end) then
@@ -687,7 +656,7 @@ function Core:CreateWindow(config)
     MainFrame.Size = UDim2.new(1, 0, 1, 0)
     MainFrame.BackgroundColor3 = self.Themes.Background
     MainFrame.BorderSizePixel = 0
-    MainFrame.ClipsDescendants = false
+    MainFrame.ClipsDescendants = true
     MainFrame.Parent = ShadowFrame
 
     local MainCorner = Instance.new("UICorner")
@@ -699,86 +668,87 @@ function Core:CreateWindow(config)
     MainStroke.Thickness = 1
     MainStroke.Parent = MainFrame
 
-    local TopBar = Instance.new("Frame")
-    TopBar.Name = "TopBar"
-    TopBar.Size = UDim2.new(1, 0, 0, 40)
-    TopBar.BackgroundColor3 = self.Themes.TopBar
-    TopBar.BorderSizePixel = 0
-    TopBar.Parent = MainFrame
-
-    local TopBarCorner = Instance.new("UICorner")
-    TopBarCorner.CornerRadius = UDim.new(0, 8)
-    TopBarCorner.Parent = TopBar
-
-    local TopBarFix = Instance.new("Frame")
-    TopBarFix.Size = UDim2.new(1, 0, 0, 10)
-    TopBarFix.Position = UDim2.new(0, 0, 1, -10)
-    TopBarFix.BackgroundColor3 = self.Themes.TopBar
-    TopBarFix.BorderSizePixel = 0
-    TopBarFix.Parent = TopBar
+    -- ==========================================
+    -- SIDEBAR (Menu Lateral)
+    -- ==========================================
+    local Sidebar = Instance.new("Frame")
+    Sidebar.Name = "Sidebar"
+    Sidebar.Size = UDim2.new(0, 200, 1, 0)
+    Sidebar.BackgroundColor3 = self.Themes.Sidebar
+    Sidebar.BorderSizePixel = 0
+    Sidebar.Parent = MainFrame
+    
+    local SidebarLine = Instance.new("Frame")
+    SidebarLine.Size = UDim2.new(0, 1, 1, 0)
+    SidebarLine.Position = UDim2.new(1, 0, 0, 0)
+    SidebarLine.BackgroundColor3 = self.Themes.Border
+    SidebarLine.BorderSizePixel = 0
+    SidebarLine.Parent = Sidebar
 
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Name = "Title"
-    TitleLabel.Size = UDim2.new(1, -20, 1, 0)
-    TitleLabel.Position = UDim2.new(0, 15, 0, 0)
+    TitleLabel.Size = UDim2.new(1, -40, 0, 60)
+    TitleLabel.Position = UDim2.new(0, 20, 0, 15)
     TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = title
+    TitleLabel.Text = "<font size='20'>Evok</font>\n<font size='12' color='#888888'>Zynn Love you &lt;3</font>"
+    TitleLabel.RichText = true
     TitleLabel.TextColor3 = self.Themes.Accent
     TitleLabel.Font = Enum.Font.GothamBold
-    TitleLabel.TextSize = 14
     TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLabel.Parent = TopBar
+    TitleLabel.TextYAlignment = Enum.TextYAlignment.Center
+    TitleLabel.Parent = Sidebar
 
-    local AccentLine = Instance.new("Frame")
-    AccentLine.Name = "AccentLine"
-    AccentLine.Size = UDim2.new(1, 0, 0, 1)
-    AccentLine.Position = UDim2.new(0, 0, 1, 0)
-    AccentLine.BackgroundColor3 = self.Themes.Accent
-    AccentLine.BorderSizePixel = 0
-    AccentLine.Parent = TopBar
-
-    self:MakeDraggable(TopBar, ShadowFrame)
-
+    -- ==========================================
+    -- CONTAINERS (Onde os Widgets e Abas vão ficar)
+    -- ==========================================
     local TabContainer = Instance.new("Frame")
     TabContainer.Name = "TabContainer"
-    TabContainer.Size = UDim2.new(1, -20, 0, 35)
-    TabContainer.Position = UDim2.new(0, 10, 0, 50)
+    TabContainer.Size = UDim2.new(1, 0, 1, -90)
+    TabContainer.Position = UDim2.new(0, 0, 0, 90)
     TabContainer.BackgroundTransparency = 1
-    TabContainer.Parent = MainFrame
+    TabContainer.Parent = Sidebar
     
     local TabListLayout = Instance.new("UIListLayout")
-    TabListLayout.FillDirection = Enum.FillDirection.Horizontal
+    TabListLayout.FillDirection = Enum.FillDirection.Vertical
     TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    TabListLayout.Padding = UDim.new(0, 15)
+    TabListLayout.Padding = UDim.new(0, 8)
+    TabListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     TabListLayout.Parent = TabContainer
 
     local PageContainer = Instance.new("Frame")
     PageContainer.Name = "PageContainer"
-    PageContainer.Size = UDim2.new(1, -20, 1, -95)
-    PageContainer.Position = UDim2.new(0, 10, 0, 85)
+    PageContainer.Size = UDim2.new(1, -200, 1, 0)
+    PageContainer.Position = UDim2.new(0, 200, 0, 0)
     PageContainer.BackgroundTransparency = 1
     PageContainer.Parent = MainFrame
 
+    -- Área de Dragging invisível sobre o Content para arrastar a janela
+    local DragBar = Instance.new("Frame")
+    DragBar.Size = UDim2.new(1, 0, 0, 40)
+    DragBar.BackgroundTransparency = 1
+    DragBar.Parent = MainFrame
+    
+    self:MakeDraggable(Sidebar, ShadowFrame)
+    self:MakeDraggable(DragBar, ShadowFrame)
+
+    -- Registro Reativo
     self:SubscribeToTheme(function(theme)
         MainFrame.BackgroundColor3 = theme.Background
         MainStroke.Color = theme.Border
-        TopBar.BackgroundColor3 = theme.TopBar
-        TopBarFix.BackgroundColor3 = theme.TopBar
+        Sidebar.BackgroundColor3 = theme.Sidebar
+        SidebarLine.BackgroundColor3 = theme.Border
         TitleLabel.TextColor3 = theme.Accent
-        AccentLine.BackgroundColor3 = theme.Accent
     end)
 
+    -- Animação de Entrada
     ShadowFrame.Size = UDim2.new(0, 0, 0, 0)
-    ShadowFrame.ClipsDescendants = true
     self:Tween(ShadowFrame, {Size = size}, 0.5, Enum.EasingStyle.Quint)
-    task.delay(0.5, function() ShadowFrame.ClipsDescendants = false end)
-
-    Core.Logger:Log("Window Builder Complete")
 
     return {
         Core = self,
         GUI = ScreenGui,
         MainFrame = MainFrame,
+        TopBar = Sidebar, -- Expõe a Sidebar como TopBar para retrocompatibilidade
         TabContainer = TabContainer,
         PageContainer = PageContainer,
         Tabs = {},
@@ -786,6 +756,7 @@ function Core:CreateWindow(config)
     }
 end
 
+-- Congela metatables sensíveis
 table.freeze(Core.Easing)
 table.freeze(Core.Math)
 
