@@ -628,7 +628,7 @@ function Core:CreateWindow(config)
     Core.Logger:Log("Initializing Sidebar Window Manager...")
     
     local title = config.Title or "Evok - Zynn Love you <3"
-    local size = config.Size or UDim2.new(0, 800, 0, 500) 
+    local size = config.Size or UDim2.new(0, 550, 0, 800) 
     
     local targetGui
     if pcall(function() return CoreGui.Name end) then
