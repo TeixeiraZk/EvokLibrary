@@ -1,1 +1,969 @@
+--[[
+    ===========================================================================
+    EVOK UI LIBRARY - PARTE 5: ULTIMATE VISUALS API & SCRIPT VIEWER
+    ===========================================================================
+    Versão: 1.0.0-PRO-MAX
+    O pacote gráfico definitivo.
+    Contém:
+    - Lua Syntax Highlighter (Lexer)
+    - Advanced Script Viewer Widget
+    - Acrylic Blur Engine (Glass Simulation)
+    - Physics-Based Notification System
+    - UI Particle Engine (Matrix Rain / Snow)
+    - Custom Cursor Engine com Trail
+    - API de Controle Externo e Unload Seguro
+    ===========================================================================
+]]
 
+return function(Evok)
+    -- ============================================================================
+    -- DECLARAÇÃO DE SERVIÇOS E VARIÁVEIS GLOBAIS
+    -- ============================================================================
+    local RunService = game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
+    local Workspace = game:GetService("Workspace")
+    local CoreGui = game:GetService("CoreGui")
+    local TextService = game:GetService("TextService")
+    local Lighting = game:GetService("Lighting")
+    local UserInputService = game:GetService("UserInputService")
+    local Players = game:GetService("Players")
+    local Camera = Workspace.CurrentCamera
+
+    Evok.Visuals = {
+        Connections = {},
+        BlurInstances = {},
+        Particles = {},
+        ActiveNotifications = {},
+        CursorInstances = {}
+    }
+
+    Evok.WindowFunctions = Evok.WindowFunctions or {}
+    Evok.API = {}
+
+    -- ============================================================================
+    -- MÓDULO 1: LUA SYNTAX HIGHLIGHTER (LEXER ENGINE)
+    -- ============================================================================
+    
+    Evok.Highlighter = {
+        Theme = {
+            Background  = Color3.fromRGB(30, 30, 35),
+            Text        = Color3.fromRGB(204, 204, 204),
+            Keyword     = Color3.fromRGB(248, 109, 124),
+            BuiltIn     = Color3.fromRGB(84, 175, 255),
+            String      = Color3.fromRGB(173, 241, 149),
+            Number      = Color3.fromRGB(255, 198, 0),
+            Comment     = Color3.fromRGB(105, 105, 105),
+            Operator    = Color3.fromRGB(204, 204, 204),
+            Function    = Color3.fromRGB(253, 251, 172)
+        }
+    }
+
+    Evok.Highlighter.Keywords = {
+        ["and"] = true, ["break"] = true, ["do"] = true, ["else"] = true, ["elseif"] = true,
+        ["end"] = true, ["false"] = true, ["for"] = true, ["function"] = true, ["if"] = true,
+        ["in"] = true, ["local"] = true, ["nil"] = true, ["not"] = true, ["or"] = true,
+        ["repeat"] = true, ["return"] = true, ["then"] = true, ["true"] = true, ["until"] = true,
+        ["while"] = true, ["continue"] = true, ["export"] = true, ["type"] = true
+    }
+
+    Evok.Highlighter.BuiltIns = {
+        ["game"] = true, ["workspace"] = true, ["script"] = true, ["math"] = true,
+        ["string"] = true, ["table"] = true, ["coroutine"] = true, ["os"] = true,
+        ["debug"] = true, ["utf8"] = true, ["bit32"] = true, ["task"] = true,
+        ["Instance"] = true, ["Color3"] = true, ["Vector3"] = true, ["Vector2"] = true,
+        ["CFrame"] = true, ["UDim2"] = true, ["UDim"] = true, ["Ray"] = true,
+        ["RaycastParams"] = true, ["OverlapParams"] = true, ["Region3"] = true,
+        ["TweenInfo"] = true, ["Enum"] = true, ["ColorSequence"] = true,
+        ["NumberSequence"] = true, ["NumberRange"] = true, ["Rect"] = true,
+        ["Axes"] = true, ["Faces"] = true, ["BrickColor"] = true, ["print"] = true,
+        ["warn"] = true, ["error"] = true, ["assert"] = true, ["pcall"] = true,
+        ["xpcall"] = true, ["typeof"] = true, ["pairs"] = true, ["ipairs"] = true, 
+        ["next"] = true, ["select"] = true, ["unpack"] = true, ["require"] = true, 
+        ["tick"] = true, ["time"] = true, ["wait"] = true, ["delay"] = true, 
+        ["spawn"] = true, ["getmetatable"] = true, ["setmetatable"] = true,
+        ["rawget"] = true, ["rawset"] = true, ["rawequal"] = true, ["tonumber"] = true,
+        ["tostring"] = true, ["loadstring"] = true, ["getfenv"] = true, ["setfenv"] = true,
+        ["gcinfo"] = true, ["collectgarbage"] = true, ["newproxy"] = true
+    }
+
+    local function SanitizeRichText(str)
+        str = string.gsub(str, "&", "&amp;")
+        str = string.gsub(str, "<", "&lt;")
+        str = string.gsub(str, ">", "&gt;")
+        str = string.gsub(str, "\"", "&quot;")
+        str = string.gsub(str, "'", "&apos;")
+        return str
+    end
+
+    local function Colorize(text, color)
+        local r = math.round(color.R * 255)
+        local g = math.round(color.G * 255)
+        local b = math.round(color.B * 255)
+        local hex = string.format("#%02X%02X%02X", r, g, b)
+        return string.format('<font color="%s">%s</font>', hex, SanitizeRichText(text))
+    end
+
+    function Evok.Highlighter:FormatCode(sourceCode)
+        if not sourceCode or sourceCode == "" then return "" end
+
+        local tokens = {}
+        local length = #sourceCode
+        local index = 1
+
+        while index <= length do
+            local startPos, endPos, matchStr
+
+            -- Match de Comentários Multilinha: --[[ ... ]]
+            startPos, endPos, matchStr = string.find(sourceCode, "^%-%-%[%[.-%]%]", index)
+            if startPos then
+                table.insert(tokens, {Type = "Comment", Text = matchStr})
+                index = endPos + 1
+                continue
+            end
+
+            -- Match de Comentários de Linha Única
+            startPos, endPos, matchStr = string.find(sourceCode, "^%-%-[^\n]*", index)
+            if startPos then
+                table.insert(tokens, {Type = "Comment", Text = matchStr})
+                index = endPos + 1
+                continue
+            end
+
+            -- Match de Strings Multilinha
+            startPos, endPos, matchStr = string.find(sourceCode, "^%[%[.-%]%]", index)
+            if startPos then
+                table.insert(tokens, {Type = "String", Text = matchStr})
+                index = endPos + 1
+                continue
+            end
+
+            -- Match de Strings ("")
+            startPos, endPos, matchStr = string.find(sourceCode, '^"[^"\\]*(?:\\.[^"\\]*)*"', index)
+            if startPos then
+                table.insert(tokens, {Type = "String", Text = matchStr})
+                index = endPos + 1
+                continue
+            end
+
+            -- Match de Strings ('')
+            startPos, endPos, matchStr = string.find(sourceCode, "^'[^'\\]*(?:\\.[^'\\]*)*'", index)
+            if startPos then
+                table.insert(tokens, {Type = "String", Text = matchStr})
+                index = endPos + 1
+                continue
+            end
+
+            -- Match Hexadecimal
+            startPos, endPos, matchStr = string.find(sourceCode, "^0x[%d%a]+", index)
+            if startPos then
+                table.insert(tokens, {Type = "Number", Text = matchStr})
+                index = endPos + 1
+                continue
+            end
+
+            -- Match Números
+            startPos, endPos, matchStr = string.find(sourceCode, "^%d+%.?%d*", index)
+            if startPos then
+                table.insert(tokens, {Type = "Number", Text = matchStr})
+                index = endPos + 1
+                continue
+            end
+
+            -- Match Palavras (Keywords, BuiltIns, Functions)
+            startPos, endPos, matchStr = string.find(sourceCode, "^[%a_][%w_]*", index)
+            if startPos then
+                local tokenType = "Text"
+                if self.Keywords[matchStr] then
+                    tokenType = "Keyword"
+                elseif self.BuiltIns[matchStr] then
+                    tokenType = "BuiltIn"
+                else
+                    local nextChar = string.match(sourceCode, "^%s*(.)", endPos + 1)
+                    if nextChar == "(" then
+                        tokenType = "Function"
+                    end
+                end
+                
+                table.insert(tokens, {Type = tokenType, Text = matchStr})
+                index = endPos + 1
+                continue
+            end
+
+            -- Match Espaços Brancos
+            startPos, endPos, matchStr = string.find(sourceCode, "^%s+", index)
+            if startPos then
+                table.insert(tokens, {Type = "Whitespace", Text = matchStr})
+                index = endPos + 1
+                continue
+            end
+
+            -- Símbolos Restantes
+            local char = string.sub(sourceCode, index, index)
+            table.insert(tokens, {Type = "Operator", Text = char})
+            index = index + 1
+        end
+
+        local formattedCode = ""
+        for _, token in ipairs(tokens) do
+            if token.Type == "Whitespace" then
+                formattedCode = formattedCode .. SanitizeRichText(token.Text)
+            elseif token.Type == "Text" then
+                formattedCode = formattedCode .. Colorize(token.Text, self.Theme.Text)
+            else
+                local targetColor = self.Theme[token.Type] or self.Theme.Text
+                formattedCode = formattedCode .. Colorize(token.Text, targetColor)
+            end
+        end
+
+        return formattedCode
+    end
+
+    -- ============================================================================
+    -- MÓDULO 2: ADVANCED SCRIPT VIEWER WIDGET
+    -- ============================================================================
+    
+    function Evok.WindowFunctions:CreateScriptViewer(TabName, SourceCode)
+        local Window = self
+        local ViewerTab = Window:CreateTab(TabName or "Script Viewer", Evok.Icons.Tabs.ScriptViewer)
+
+        local MainContainer = Evok.Utility.Instance:Create("Frame", {
+            Name = "ScriptViewer_Container",
+            Parent = ViewerTab.PageObj or ViewerTab.Page,
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ZIndex = 1
+        })
+
+        if MainContainer.Parent and MainContainer.Parent:FindFirstChild("UIListLayout") then
+            MainContainer.Parent.UIListLayout.Padding = UDim.new(0, 0)
+        end
+
+        local EditorBackground = Evok.Utility.Instance:Create("Frame", {
+            Name = "EditorBackground",
+            Parent = MainContainer,
+            Size = UDim2.new(1, 0, 1, -50),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundColor3 = Evok.Highlighter.Theme.Background,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            ZIndex = 2
+        })
+        
+        Evok.Utility.Instance:CreateRound(6).Parent = EditorBackground
+        Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Border"), 1).Parent = EditorBackground
+
+        local LineNumberGutter = Evok.Utility.Instance:Create("Frame", {
+            Name = "LineNumbersGutter",
+            Parent = EditorBackground,
+            Size = UDim2.new(0, 40, 1, 0),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundColor3 = Color3.fromRGB(25, 25, 30),
+            BorderSizePixel = 0,
+            ZIndex = 3
+        })
+        
+        Evok.Utility.Instance:Create("Frame", {
+            Name = "GutterBorder",
+            Parent = LineNumberGutter,
+            Size = UDim2.new(0, 1, 1, 0),
+            Position = UDim2.new(1, -1, 0, 0),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Border"),
+            BorderSizePixel = 0,
+            ZIndex = 4
+        })
+
+        local CodeScrollArea = Evok.Utility.Instance:Create("ScrollingFrame", {
+            Name = "CodeScrollArea",
+            Parent = EditorBackground,
+            Size = UDim2.new(1, -40, 1, 0),
+            Position = UDim2.new(0, 40, 0, 0),
+            BackgroundTransparency = 1,
+            ScrollBarThickness = 6,
+            ScrollBarImageColor3 = Evok.ThemeManager:GetColor("TextDark"),
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            BorderSizePixel = 0,
+            ZIndex = 3
+        })
+
+        local LineScrollArea = Evok.Utility.Instance:Create("ScrollingFrame", {
+            Name = "LineScrollArea",
+            Parent = LineNumberGutter,
+            Size = UDim2.new(1, -1, 1, 0),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1,
+            ScrollBarThickness = 0,
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            BorderSizePixel = 0,
+            ZIndex = 3,
+            ScrollingEnabled = false
+        })
+
+        local CodeDisplay = Evok.Utility.Instance:Create("TextLabel", {
+            Name = "CodeDisplay",
+            Parent = CodeScrollArea,
+            Size = UDim2.new(1, -20, 0, 0),
+            Position = UDim2.new(0, 10, 0, 10),
+            BackgroundTransparency = 1,
+            Text = "",
+            TextColor3 = Evok.Highlighter.Theme.Text,
+            Font = Evok.Fonts.Code,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            RichText = true,
+            TextWrapped = false,
+            ZIndex = 4
+        })
+
+        local LineNumbersDisplay = Evok.Utility.Instance:Create("TextLabel", {
+            Name = "LineNumbersDisplay",
+            Parent = LineScrollArea,
+            Size = UDim2.new(1, -10, 0, 0),
+            Position = UDim2.new(0, 0, 0, 10),
+            BackgroundTransparency = 1,
+            Text = "1",
+            TextColor3 = Evok.ThemeManager:GetColor("TextDark"),
+            Font = Evok.Fonts.Code,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            ZIndex = 4
+        })
+
+        local connScroll = CodeScrollArea:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+            LineScrollArea.CanvasPosition = Vector2.new(0, CodeScrollArea.CanvasPosition.Y)
+        end)
+        table.insert(Evok.Visuals.Connections, connScroll)
+
+        local ActionBar = Evok.Utility.Instance:Create("Frame", {
+            Name = "ActionBar",
+            Parent = MainContainer,
+            Size = UDim2.new(1, 0, 0, 40),
+            Position = UDim2.new(0, 0, 1, -40),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Container"),
+            BorderSizePixel = 0,
+            ZIndex = 2
+        })
+        Evok.Utility.Instance:CreateRound(6).Parent = ActionBar
+        Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Border"), 1).Parent = ActionBar
+
+        local CopyButton = Evok.Utility.Instance:Create("TextButton", {
+            Name = "CopyButton",
+            Parent = ActionBar,
+            Size = UDim2.new(0, 150, 0, 30),
+            Position = UDim2.new(1, -160, 0.5, -15),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Accent"),
+            Text = "Copy to Clipboard",
+            TextColor3 = Color3.fromRGB(255, 255, 255),
+            Font = Evok.Fonts.Semibold,
+            TextSize = 12,
+            AutoButtonColor = false,
+            ZIndex = 3
+        })
+        Evok.Utility.Instance:CreateRound(4).Parent = CopyButton
+
+        local InfoLabel = Evok.Utility.Instance:Create("TextLabel", {
+            Name = "InfoLabel",
+            Parent = ActionBar,
+            Size = UDim2.new(0, 200, 1, 0),
+            Position = UDim2.new(0, 15, 0, 0),
+            BackgroundTransparency = 1,
+            Text = "Language: Luau  |  0 Lines",
+            TextColor3 = Evok.ThemeManager:GetColor("TextDark"),
+            Font = Evok.Fonts.Main,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 3
+        })
+
+        local function LoadCode(code)
+            SourceCode = code or "-- No code provided."
+            
+            local lines = 1
+            local lineString = "1"
+            for _ in string.gmatch(SourceCode, "\n") do
+                lines = lines + 1
+                lineString = lineString .. "\n" .. tostring(lines)
+            end
+
+            InfoLabel.Text = "Language: Luau  |  " .. tostring(lines) .. " Lines"
+            LineNumbersDisplay.Text = lineString
+
+            CodeDisplay.Text = Evok.Highlighter:FormatCode(SourceCode)
+
+            local textBounds = TextService:GetTextSize(
+                SourceCode, 13, Evok.Fonts.Code, Vector2.new(math.huge, math.huge)
+            )
+
+            local targetY = math.max(textBounds.Y + 20, EditorBackground.AbsoluteSize.Y)
+            local targetX = math.max(textBounds.X + 20, CodeScrollArea.AbsoluteSize.X)
+
+            CodeDisplay.Size = UDim2.new(0, targetX, 0, targetY)
+            LineNumbersDisplay.Size = UDim2.new(1, -10, 0, targetY)
+
+            CodeScrollArea.CanvasSize = UDim2.new(0, targetX, 0, targetY)
+            LineScrollArea.CanvasSize = UDim2.new(0, 0, 0, targetY)
+        end
+
+        CopyButton.MouseButton1Click:Connect(function()
+            if setclipboard then
+                setclipboard(SourceCode)
+                local oldText = CopyButton.Text
+                CopyButton.Text = "Copied!"
+                TweenService:Create(CopyButton, TweenInfo.new(0.1), {Size = UDim2.new(0, 140, 0, 28)}):Play()
+                task.delay(0.1, function()
+                    TweenService:Create(CopyButton, TweenInfo.new(0.1), {Size = UDim2.new(0, 150, 0, 30)}):Play()
+                end)
+                task.delay(1.5, function() CopyButton.Text = oldText end)
+            end
+        end)
+
+        LoadCode(SourceCode)
+
+        return {
+            SetCode = function(newCode) LoadCode(newCode) end,
+            GetCode = function() return SourceCode end
+        }
+    end
+
+    -- ============================================================================
+    -- MÓDULO 3: ACRYLIC BLUR ENGINE (Glass Simulation)
+    -- ============================================================================
+    
+    Evok.AcrylicEngine = {
+        Enabled = false,
+        Intensity = 0.5,
+        ViewportFrame = nil,
+        GlassPart = nil,
+        Connection = nil
+    }
+
+    function Evok.AcrylicEngine:Initialize(TargetUIFrame)
+        if not TargetUIFrame then return end
+        if not Camera then return end
+
+        if self.ViewportFrame then self.ViewportFrame:Destroy() end
+
+        self.ViewportFrame = Evok.Utility.Instance:Create("ViewportFrame", {
+            Name = "Evok_Acrylic_Blur",
+            Parent = TargetUIFrame,
+            Size = UDim2.new(1, 0, 1, 0),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1,
+            CurrentCamera = Camera,
+            LightColor = Color3.new(1, 1, 1),
+            Ambient = Color3.new(1, 1, 1),
+            ZIndex = -10
+        })
+
+        self.GlassPart = Evok.Utility.Instance:Create("Part", {
+            Name = "BlurLens",
+            Parent = self.ViewportFrame,
+            Material = Enum.Material.Glass,
+            Color = Evok.ThemeManager:GetColor("Background"),
+            Transparency = 0.5 + (0.5 * (1 - self.Intensity)),
+            Reflectance = 0,
+            CastShadow = false,
+            CanCollide = false,
+            Anchored = true,
+            Size = Vector3.new(100, 100, 0.05)
+        })
+
+        self.Connection = RunService.RenderStepped:Connect(function()
+            if not self.Enabled then return end
+            if not self.ViewportFrame or not self.GlassPart then return end
+            
+            local camCFrame = Camera.CFrame
+            self.GlassPart.CFrame = camCFrame * CFrame.new(0, 0, -0.5)
+        end)
+        
+        table.insert(Evok.Visuals.Connections, self.Connection)
+        table.insert(Evok.Visuals.BlurInstances, self.ViewportFrame)
+    end
+
+    function Evok.AcrylicEngine:Toggle(State)
+        self.Enabled = State
+        if self.ViewportFrame then
+            self.ViewportFrame.Visible = State
+        end
+    end
+
+    -- ============================================================================
+    -- MÓDULO 4: PHYSICS-BASED NOTIFICATION ENGINE
+    -- ============================================================================
+    -- Sistema avançado de Notificações. As notificações caem, se empurram 
+    -- e possuem barras de progresso reais.
+
+    Evok.NotificationEngine = {
+        Container = nil,
+        Padding = 10,
+        BaseWidth = 300,
+        ActiveList = {}
+    }
+
+    function Evok.NotificationEngine:Initialize()
+        if self.Container then return end
+        
+        local Screen = Evok.Utility.Instance:Create("ScreenGui", {
+            Name = "Evok_Notification_Physics_Layer",
+            Parent = CoreGui,
+            ZIndexBehavior = Enum.ZIndexBehavior.Global,
+            ResetOnSpawn = false
+        })
+        
+        self.Container = Evok.Utility.Instance:Create("Frame", {
+            Name = "Boundary",
+            Parent = Screen,
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0
+        })
+    end
+
+    function Evok.NotificationEngine:UpdatePhysics()
+        local currentY = self.Container.AbsoluteSize.Y - self.Padding
+        
+        for i = #self.ActiveList, 1, -1 do
+            local notif = self.ActiveList[i]
+            local targetY = currentY - notif.Frame.AbsoluteSize.Y
+            
+            TweenService:Create(notif.Frame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Position = UDim2.new(1, -(self.BaseWidth + self.Padding), 0, targetY)
+            }):Play()
+            
+            currentY = targetY - self.Padding
+        end
+    end
+
+    function Evok.API:Notify(Config)
+        Evok.NotificationEngine:Initialize()
+
+        local Title = Config.Title or "Notification"
+        local Content = Config.Content or "No content provided."
+        local Duration = Config.Duration or 5
+        local Type = Config.Type or "Info"
+
+        local ThemeColor = Evok.ThemeManager:GetColor("Accent")
+        if Type == "Success" then ThemeColor = Evok.ThemeManager:GetColor("Success") end
+        if Type == "Warning" then ThemeColor = Evok.ThemeManager:GetColor("Warning") end
+        if Type == "Error" then ThemeColor = Evok.ThemeManager:GetColor("Error") end
+
+        local Frame = Evok.Utility.Instance:Create("Frame", {
+            Name = "Notification_" .. Title,
+            Parent = Evok.NotificationEngine.Container,
+            Size = UDim2.new(0, Evok.NotificationEngine.BaseWidth, 0, 0),
+            Position = UDim2.new(1, 50, 0, Evok.NotificationEngine.Container.AbsoluteSize.Y), -- Nasce fora da tela
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Container"),
+            BorderSizePixel = 0
+        })
+
+        Evok.Utility.Instance:CreateRound(6).Parent = Frame
+        Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Border"), 1).Parent = Frame
+
+        local AccentLine = Evok.Utility.Instance:Create("Frame", {
+            Name = "Accent",
+            Parent = Frame,
+            Size = UDim2.new(0, 3, 1, 0),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundColor3 = ThemeColor,
+            BorderSizePixel = 0
+        })
+        Evok.Utility.Instance:CreateRound(3).Parent = AccentLine
+
+        local TitleLabel = Evok.Utility.Instance:Create("TextLabel", {
+            Name = "Title",
+            Parent = Frame,
+            Size = UDim2.new(1, -40, 0, 20),
+            Position = UDim2.new(0, 15, 0, 8),
+            BackgroundTransparency = 1,
+            Text = Title,
+            TextColor3 = Evok.ThemeManager:GetColor("Text"),
+            Font = Evok.Fonts.Bold,
+            TextSize = 14,
+            TextXAlignment = Enum.TextXAlignment.Left
+        })
+
+        local ContentLabel = Evok.Utility.Instance:Create("TextLabel", {
+            Name = "Content",
+            Parent = Frame,
+            Size = UDim2.new(1, -30, 0, 0),
+            Position = UDim2.new(0, 15, 0, 30),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1,
+            Text = Content,
+            TextColor3 = Evok.ThemeManager:GetColor("TextDark"),
+            Font = Evok.Fonts.Main,
+            TextSize = 13,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top
+        })
+
+        local Padding = Evok.Utility.Instance:Create("UIPadding", {
+            Parent = Frame,
+            PaddingBottom = UDim.new(0, 18) -- Espaço para a barra de progresso
+        })
+
+        local ProgressBarBG = Evok.Utility.Instance:Create("Frame", {
+            Name = "ProgressBG",
+            Parent = Frame,
+            Size = UDim2.new(1, 0, 0, 2),
+            Position = UDim2.new(0, 0, 1, -2),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Background"),
+            BorderSizePixel = 0
+        })
+
+        local ProgressBar = Evok.Utility.Instance:Create("Frame", {
+            Name = "Progress",
+            Parent = ProgressBarBG,
+            Size = UDim2.new(1, 0, 1, 0),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundColor3 = ThemeColor,
+            BorderSizePixel = 0
+        })
+
+        -- Adiciona à lista e recalcula física
+        local NotifData = {Frame = Frame, IsAlive = true}
+        table.insert(Evok.NotificationEngine.ActiveList, NotifData)
+        Evok.NotificationEngine:UpdatePhysics()
+
+        -- Animação da Barra de Tempo
+        TweenService:Create(ProgressBar, TweenInfo.new(Duration, Enum.EasingStyle.Linear), {
+            Size = UDim2.new(0, 0, 1, 0)
+        }):Play()
+
+        -- Sistema de Autodestruição
+        task.delay(Duration, function()
+            if NotifData.IsAlive then
+                NotifData.IsAlive = false
+                
+                -- Fade Out Anim
+                local fade = TweenService:Create(Frame, TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.In), {
+                    Position = UDim2.new(1, 50, 0, Frame.Position.Y.Offset),
+                    BackgroundTransparency = 1
+                })
+                
+                -- Aplicar transparência a tudo dentro do frame
+                for _, child in ipairs(Frame:GetDescendants()) do
+                    if child:IsA("TextLabel") then
+                        TweenService:Create(child, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
+                    elseif child:IsA("Frame") then
+                        TweenService:Create(child, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+                    elseif child:IsA("UIStroke") then
+                        TweenService:Create(child, TweenInfo.new(0.3), {Transparency = 1}):Play()
+                    end
+                end
+
+                fade:Play()
+                fade.Completed:Wait()
+                
+                Frame:Destroy()
+                
+                -- Remove da lista ativa e atualiza as outras
+                for i, v in ipairs(Evok.NotificationEngine.ActiveList) do
+                    if v == NotifData then
+                        table.remove(Evok.NotificationEngine.ActiveList, i)
+                        break
+                    end
+                end
+                Evok.NotificationEngine:UpdatePhysics()
+            end
+        end)
+    end
+
+    -- ============================================================================
+    -- MÓDULO 5: UI PARTICLE ENGINE (Matrix Rain / Snow)
+    -- ============================================================================
+    
+    Evok.ParticleEngine = {
+        Enabled = false,
+        Mode = "Snow", -- "Snow" ou "Matrix"
+        Container = nil,
+        ParticleCount = 50,
+        Connection = nil
+    }
+
+    function Evok.ParticleEngine:Initialize(TargetGui)
+        if self.Container then return end
+        self.Container = Evok.Utility.Instance:Create("Frame", {
+            Name = "Evok_Particle_Layer",
+            Parent = TargetGui,
+            Size = UDim2.new(1, 0, 1, 0),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1,
+            ClipsDescendants = true,
+            ZIndex = 0 -- Atrás dos botões, na frente do fundo
+        })
+    end
+
+    function Evok.ParticleEngine:CreateParticle()
+        if not self.Container then return end
+        
+        local isMatrix = (self.Mode == "Matrix")
+        
+        local Particle = Evok.Utility.Instance:Create("TextLabel", {
+            Parent = self.Container,
+            BackgroundTransparency = 1,
+            Text = isMatrix and string.char(math.random(33, 126)) or "•",
+            TextColor3 = isMatrix and Evok.ThemeManager:GetColor("Success") or Color3.fromRGB(255, 255, 255),
+            Font = isMatrix and Evok.Fonts.Code or Evok.Fonts.Main,
+            TextSize = isMatrix and math.random(10, 16) or math.random(8, 20),
+            TextTransparency = math.random(20, 80) / 100,
+            Position = UDim2.new(math.random(0, 100)/100, 0, -0.1, 0),
+            Size = UDim2.new(0, 20, 0, 20),
+            ZIndex = 0
+        })
+
+        local duration = math.random(3, 8)
+        local targetY = 1.1
+
+        -- Tween linear caindo
+        local fallTween = TweenService:Create(Particle, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+            Position = UDim2.new(Particle.Position.X.Scale, 0, targetY, 0)
+        })
+
+        -- Se for Matrix, roda as letras
+        if isMatrix then
+            task.spawn(function()
+                while Particle and Particle.Parent do
+                    Particle.Text = string.char(math.random(33, 126))
+                    task.wait(0.1)
+                end
+            end)
+        end
+
+        fallTween:Play()
+        fallTween.Completed:Connect(function()
+            Particle:Destroy()
+        end)
+    end
+
+    function Evok.ParticleEngine:Toggle(State, Mode)
+        self.Enabled = State
+        if Mode then self.Mode = Mode end
+
+        if State then
+            if not self.Connection then
+                self.Connection = RunService.RenderStepped:Connect(function()
+                    if math.random(1, 10) > 8 then -- Controla a densidade
+                        self:CreateParticle()
+                    end
+                end)
+                table.insert(Evok.Visuals.Connections, self.Connection)
+            end
+        else
+            if self.Connection then
+                self.Connection:Disconnect()
+                self.Connection = nil
+            end
+            -- Limpa as partículas ativas
+            if self.Container then
+                for _, child in ipairs(self.Container:GetChildren()) do
+                    child:Destroy()
+                end
+            end
+        end
+    end
+
+    -- ============================================================================
+    -- MÓDULO 6: CUSTOM CURSOR ENGINE (Software Rendering)
+    -- ============================================================================
+
+    Evok.CursorEngine = {
+        Enabled = false,
+        Gui = nil,
+        Cursor = nil,
+        TrailContainer = nil,
+        Connection = nil
+    }
+
+    function Evok.CursorEngine:Initialize()
+        if self.Gui then return end
+
+        self.Gui = Evok.Utility.Instance:Create("ScreenGui", {
+            Name = "Evok_Custom_Cursor",
+            Parent = CoreGui,
+            ZIndexBehavior = Enum.ZIndexBehavior.Global,
+            DisplayOrder = 9999 -- Sempre no topo
+        })
+
+        self.TrailContainer = Evok.Utility.Instance:Create("Frame", {
+            Parent = self.Gui,
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1
+        })
+
+        self.Cursor = Evok.Utility.Instance:Create("ImageLabel", {
+            Name = "Pointer",
+            Parent = self.Gui,
+            Size = UDim2.new(0, 16, 0, 16),
+            BackgroundTransparency = 1,
+            Image = "rbxassetid://10057378285", -- Ícone genérico, ajustar conforme tema
+            ImageColor3 = Evok.ThemeManager:GetColor("Accent"),
+            AnchorPoint = Vector2.new(0, 0),
+            ZIndex = 100
+        })
+
+        -- Esconde o mouse padrão do Roblox
+        UserInputService.MouseIconEnabled = false
+    end
+
+    function Evok.CursorEngine:CreateRipple(Position)
+        local Ripple = Evok.Utility.Instance:Create("Frame", {
+            Parent = self.TrailContainer,
+            Size = UDim2.new(0, 0, 0, 0),
+            Position = UDim2.new(0, Position.X, 0, Position.Y),
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Accent"),
+            BackgroundTransparency = 0.5,
+            ZIndex = 99
+        })
+        Evok.Utility.Instance:CreateRound(100).Parent = Ripple
+        Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Accent"), 1).Parent = Ripple
+
+        local tw = TweenService:Create(Ripple, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 30, 0, 30),
+            BackgroundTransparency = 1
+        })
+        tw:Play()
+        tw.Completed:Connect(function() Ripple:Destroy() end)
+    end
+
+    function Evok.CursorEngine:Toggle(State)
+        self.Enabled = State
+        
+        if State then
+            self:Initialize()
+            UserInputService.MouseIconEnabled = false
+            
+            if not self.Connection then
+                self.Connection = RunService.RenderStepped:Connect(function()
+                    local mousePos = UserInputService:GetMouseLocation()
+                    -- Lerp para movimento suave
+                    self.Cursor.Position = UDim2.new(0, mousePos.X, 0, mousePos.Y)
+                end)
+                table.insert(Evok.Visuals.Connections, self.Connection)
+
+                -- Evento de clique
+                local clickConn = UserInputService.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        local pos = UserInputService:GetMouseLocation()
+                        self:CreateRipple(pos)
+                    end
+                end)
+                table.insert(Evok.Visuals.Connections, clickConn)
+            end
+        else
+            UserInputService.MouseIconEnabled = true
+            if self.Connection then
+                self.Connection:Disconnect()
+                self.Connection = nil
+            end
+            if self.Gui then
+                self.Gui:Destroy()
+                self.Gui = nil
+            end
+        end
+    end
+
+    -- ============================================================================
+    -- MÓDULO 7: DEVELOPER EXTERNAL API (Global Control)
+    -- ============================================================================
+    
+    function Evok.API:GetFlag(FlagName)
+        return Evok.Flags[FlagName]
+    end
+
+    function Evok.API:SetFlag(FlagName, Value)
+        if Evok.Flags[FlagName] ~= nil then
+            Evok.Flags[FlagName] = Value
+            return true
+        end
+        return false
+    end
+
+    function Evok.API:SetTheme(ThemeName)
+        if Evok.ThemeManager.Themes[ThemeName] then
+            Evok.ThemeManager:SetTheme(ThemeName)
+            return true
+        end
+        return false
+    end
+
+    function Evok.API:ToggleAcrylic(State)
+        Evok.AcrylicEngine:Toggle(State)
+    end
+
+    function Evok.API:ToggleParticles(State, Mode)
+        Evok.ParticleEngine:Toggle(State, Mode)
+    end
+
+    -- ============================================================================
+    -- MÓDULO 8: GLOBAL UNLOAD MANAGER (Autodestruição Limpa)
+    -- ============================================================================
+    
+    function Evok:Unload()
+        Evok.API:Notify({Title = "Evok", Content = "Commencing Unload Protocol...", Type = "Warning", Duration = 2})
+        task.wait(0.5)
+        
+        -- Restaura configurações do Roblox
+        UserInputService.MouseIconEnabled = true
+        
+        -- 1. Limpeza de Conexões do Core
+        for _, conn in pairs(self.Connections) do
+            if typeof(conn) == "RBXScriptConnection" and conn.Connected then conn:Disconnect() end
+        end
+        self.Connections = {}
+
+        -- 2. Limpeza de Conexões Visuais
+        for _, conn in pairs(Evok.Visuals.Connections) do
+            if typeof(conn) == "RBXScriptConnection" and conn.Connected then conn:Disconnect() end
+        end
+        Evok.Visuals.Connections = {}
+
+        -- 3. Limpeza de Conexões do System (Parte 4)
+        if Evok.System and Evok.System.Connections then
+            for _, conn in pairs(Evok.System.Connections) do
+                if typeof(conn) == "RBXScriptConnection" and conn.Connected then conn:Disconnect() end
+            end
+        end
+
+        if Evok.PlayerListAPI and Evok.PlayerListAPI.Connections then
+            for _, conn in pairs(Evok.PlayerListAPI.Connections) do
+                if typeof(conn) == "RBXScriptConnection" and conn.Connected then conn:Disconnect() end
+            end
+        end
+
+        -- 4. Destruição de Interfaces
+        for _, inst in pairs(self.Instances) do
+            if typeof(inst) == "Instance" and inst.Parent then inst:Destroy() end
+        end
+        self.Instances = {}
+
+        -- 5. Limpeza de Containers Globais Extras
+        if Evok.NotificationEngine and Evok.NotificationEngine.Container then
+            Evok.NotificationEngine.Container.Parent:Destroy()
+        end
+
+        if Evok.CursorEngine and Evok.CursorEngine.Gui then
+            Evok.CursorEngine.Gui:Destroy()
+        end
+
+        -- 6. Liberação de Memória
+        Evok.Flags = {}
+        if Evok.PlayerListAPI then
+            Evok.PlayerListAPI.AvatarCache.Headshots = {}
+            Evok.PlayerListAPI.AvatarCache.Busts = {}
+            Evok.PlayerListAPI.AvatarCache.FullBody = {}
+        end
+
+        self.IsRunning = false
+        print("[EVOK] Unload Complete. Memory cleared.")
+    end
+
+    -- ============================================================================
+    -- FIM DO ARQUIVO VISUALSAPI.LUA (PARTE 5 - ULTIMATE)
+    -- ============================================================================
+end
