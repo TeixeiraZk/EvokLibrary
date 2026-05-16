@@ -1,770 +1,854 @@
 -- ==============================================================================
--- 🎨 EVOK UI LIBRARY - PART 1: CORE ENGINE (Core.lua)
--- Version: 4.0.0 | Developer: Senior UI/UX Engineer (Evok)
--- Design: Matcha Style (Top Navigation) | Dark Grey/Pink | 650x600
+-- 🗂️ EVOK UI LIBRARY - PART 2: UNIFIED WIDGETS ENGINE (Widgets.lua)
+-- Version: 3.0.0 | Developer: Senior UI/UX Engineer (Evok)
+-- Design: Top Navigation (Matcha Style) | Unified Controls | 850+ Lines
 -- ==============================================================================
 
-local CoreGui = game:GetService("CoreGui")
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local Stats = game:GetService("Stats")
-local HttpService = game:GetService("HttpService")
+local TextService = game:GetService("TextService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
 -- ==============================================================================
--- 📐 LUAU TYPES & STRICT CONFIGURATION
+-- 📐 LUAU TYPES (Strict Widget Typing)
 -- ==============================================================================
-export type ColorTheme = {
-    Background: Color3,
-    Container: Color3,
-    TopBar: Color3,
-    Accent: Color3,
-    Text: Color3,
-    TextMuted: Color3,
-    Border: Color3,
-    NotificationBg: Color3,
-    Success: Color3,
-    Warning: Color3,
-    Error: Color3
-}
+export type ToggleConfig = { Name: string, Default: boolean?, Tooltip: string?, Callback: (boolean) -> void }
+export type SliderConfig = { Name: string, Min: number, Max: number, Default: number?, Step: number?, Tooltip: string?, Callback: (number) -> void }
+export type ButtonConfig = { Name: string, Cooldown: number?, Tooltip: string?, Callback: () -> void }
+export type TextBoxConfig = { Name: string, Placeholder: string?, ClearOnFocus: boolean?, Tooltip: string?, Callback: (string) -> void }
+export type RadioConfig = { Name: string, Options: {string}, Default: string?, Callback: (string) -> void }
+export type DropdownConfig = { Name: string, Options: {string}, Default: string?, Callback: (string) -> void }
+export type KeybindConfig = { Name: string, Default: Enum.KeyCode?, Mode: string?, Callback: (boolean) -> void }
+export type ColorPickerConfig = { Name: string, Default: Color3?, Alpha: number?, Callback: (Color3, number) -> void }
 
-export type EvokCore = {
-    Themes: ColorTheme,
-    GUI: ScreenGui?,
-    WatermarkActive: boolean,
-    DebugMode: boolean,
-    CreateWindow: (self: EvokCore, config: any) -> any,
-    Notify: (self: EvokCore, config: any) -> void,
-}
-
-local Core = {
-    Themes = {
-        Background = Color3.fromRGB(18, 18, 18),     -- Fundo principal (Matcha style)
-        Container = Color3.fromRGB(24, 24, 24),      -- Fundo das seções (Matcha style)
-        TopBar = Color3.fromRGB(18, 18, 18),         -- Fundo do topo (mesmo do background)
-        Accent = Color3.fromRGB(243, 140, 203),      -- Rosa/Roxo claro (Matcha style)
-        Text = Color3.fromRGB(255, 255, 255),        -- Texto claro
-        TextMuted = Color3.fromRGB(140, 140, 140),   -- Texto escurecido
-        Border = Color3.fromRGB(35, 35, 35),         -- Contornos sutis
-        NotificationBg = Color3.fromRGB(22, 22, 22),
-        Success = Color3.fromRGB(166, 227, 161),
-        Warning = Color3.fromRGB(210, 168, 255),
-        Error = Color3.fromRGB(255, 123, 114)
-    },
-    ActiveNotifications = {},
-    Connections = {},
-    GUI = nil,
-    WatermarkActive = false,
-    DebugMode = true
-}
-Core.__index = Core
+local Widgets = {}
 
 -- ==============================================================================
--- 📡 SIGNAL ENGINE (High-Performance Event Handling)
+-- 💉 INJECTION SYSTEM (Conecta com a Janela do Core.lua)
 -- ==============================================================================
-local Signal = {}
-Signal.__index = Signal
+function Widgets.Inject(WindowInstance)
+    local Core = WindowInstance.Core 
 
-function Signal.new()
-    local self = setmetatable({
-        _bindableEvent = Instance.new("BindableEvent"),
-        _argMap = {},
-        _argCount = 0,
-    }, Signal)
-    return self
-end
-
-function Signal:Connect(handler)
-    if not (type(handler) == "function") then error(("Connect(%s)"):format(typeof(handler)), 2) end
-    return self._bindableEvent.Event:Connect(function(key)
-        handler(unpack(self._argMap[key], 1, self._argCount))
-    end)
-end
-
-function Signal:Fire(...)
-    self._argCount = select("#", ...)
-    local args = {...}
-    local key = HttpService:GenerateGUID(false)
-    self._argMap[key] = args
-    self._bindableEvent:Fire(key)
-    self._argMap[key] = nil
-end
-
-function Signal:Wait()
-    local key = self._bindableEvent.Event:Wait()
-    return unpack(self._argMap[key], 1, self._argCount)
-end
-
-function Signal:Destroy()
-    if self._bindableEvent then
-        self._bindableEvent:Destroy()
-        self._bindableEvent = nil
-    end
-    self._argMap = nil
-end
-
-Core.ThemeSignal = Signal.new()
-
--- ==============================================================================
--- 📝 INTERNAL LOGGER ENGINE
--- ==============================================================================
-Core.Logger = {}
-function Core.Logger:Log(msg: string)
-    if Core.DebugMode then print(string.format("[Evok Engine] %s", tostring(msg))) end
-end
-function Core.Logger:Warn(msg: string)
-    if Core.DebugMode then warn(string.format("[Evok Warning] %s", tostring(msg))) end
-end
-function Core.Logger:Error(msg: string)
-    error(string.format("[Evok FATAL] %s", tostring(msg)), 2)
-end
-
--- ==============================================================================
--- 🎨 ADVANCED COLOR MATH ENGINE (RGB, HSV, HSL, CMYK Conversions)
--- ==============================================================================
-Core.Math = { Color = {} }
-
-function Core.Math.Color.ToHex(color: Color3): string
-    return string.format("#%02X%02X%02X", color.R * 255, color.G * 255, color.B * 255)
-end
-
-function Core.Math.Color.FromHex(hex: string): Color3
-    hex = hex:gsub("#", "")
-    return Color3.fromRGB(tonumber(hex:sub(1,2),16) or 255, tonumber(hex:sub(3,4),16) or 255, tonumber(hex:sub(5,6),16) or 255)
-end
-
-function Core.Math.Color.ToHSL(color: Color3)
-    local r, g, b = color.R, color.G, color.B
-    local max, min = math.max(r, g, b), math.min(r, g, b)
-    local h, s, l
-    l = (max + min) / 2
-    if max == min then
-        h, s = 0, 0
-    else
-        local d = max - min
-        s = l > 0.5 and d / (2 - max - min) or d / (max + min)
-        if max == r then h = (g - b) / d + (g < b and 6 or 0)
-        elseif max == g then h = (b - r) / d + 2
-        elseif max == b then h = (r - g) / d + 4 end
-        h = h / 6
-    end
-    return h, s, l
-end
-
-function Core.Math.Color.FromHSL(h: number, s: number, l: number): Color3
-    local r, g, b
-    if s == 0 then
-        r, g, b = l, l, l
-    else
-        local function hue2rgb(p, q, t)
-            if t < 0 then t = t + 1 end
-            if t > 1 then t = t - 1 end
-            if t < 1/6 then return p + (q - p) * 6 * t end
-            if t < 1/2 then return q end
-            if t < 2/3 then return p + (q - p) * (2/3 - t) * 6 end
-            return p
-        end
-        local q = l < 0.5 and l * (1 + s) or l + s - l * s
-        local p = 2 * l - q
-        r = hue2rgb(p, q, h + 1/3)
-        g = hue2rgb(p, q, h)
-        b = hue2rgb(p, q, h - 1/3)
-    end
-    return Color3.new(r, g, b)
-end
-
-function Core.Math.Color.ToCMYK(color: Color3)
-    local c = 1 - color.R
-    local m = 1 - color.G
-    local y = 1 - color.B
-    local k = math.min(c, math.min(m, y))
-    if k == 1 then return 0, 0, 0, 1 end
-    c = (c - k) / (1 - k)
-    m = (m - k) / (1 - k)
-    y = (y - k) / (1 - k)
-    return c, m, y, k
-end
-
-function Core.Math.Color.FromCMYK(c: number, m: number, y: number, k: number): Color3
-    local r = 1 - math.min(1, c * (1 - k) + k)
-    local g = 1 - math.min(1, m * (1 - k) + k)
-    local b = 1 - math.min(1, y * (1 - k) + k)
-    return Color3.new(r, g, b)
-end
-
-function Core.Math.Color.Darken(color: Color3, amount: number): Color3
-    local h, s, v = color:ToHSV()
-    return Color3.fromHSV(h, s, math.clamp(v - amount, 0, 1))
-end
-
-function Core.Math.Color.Lighten(color: Color3, amount: number): Color3
-    local h, s, v = color:ToHSV()
-    return Color3.fromHSV(h, s, math.clamp(v + amount, 0, 1))
-end
-
-function Core.Math.Color.Blend(color1: Color3, color2: Color3, alpha: number): Color3
-    return color1:Lerp(color2, alpha)
-end
-
-function Core.Math.Color.GetLuminance(color: Color3): number
-    return 0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B
-end
-
-function Core.Math.Color.GetContrastRatio(color1: Color3, color2: Color3): number
-    local l1 = Core.Math.Color.GetLuminance(color1)
-    local l2 = Core.Math.Color.GetLuminance(color2)
-    if l1 > l2 then
-        return (l1 + 0.05) / (l2 + 0.05)
-    else
-        return (l2 + 0.05) / (l1 + 0.05)
-    end
-end
-
--- ==============================================================================
--- 🧮 CUSTOM EASING ENGINE (33 Penner Equations - High Performance)
--- ==============================================================================
-Core.Easing = {}
-
--- Linear
-function Core.Easing.Linear(t, b, c, d) return c * t / d + b end
-
--- Sine
-function Core.Easing.InSine(t, b, c, d) return -c * math.cos(t / d * (math.pi / 2)) + c + b end
-function Core.Easing.OutSine(t, b, c, d) return c * math.sin(t / d * (math.pi / 2)) + b end
-function Core.Easing.InOutSine(t, b, c, d) return -c / 2 * (math.cos(math.pi * t / d) - 1) + b end
-
--- Quad
-function Core.Easing.InQuad(t, b, c, d) t = t / d; return c * math.pow(t, 2) + b end
-function Core.Easing.OutQuad(t, b, c, d) t = t / d; return -c * t * (t - 2) + b end
-function Core.Easing.InOutQuad(t, b, c, d)
-    t = t / d * 2
-    if t < 1 then return c / 2 * math.pow(t, 2) + b end
-    return -c / 2 * ((t - 1) * (t - 3) - 1) + b
-end
-
--- Cubic
-function Core.Easing.InCubic(t, b, c, d) t = t / d; return c * math.pow(t, 3) + b end
-function Core.Easing.OutCubic(t, b, c, d) t = t / d - 1; return c * (math.pow(t, 3) + 1) + b end
-function Core.Easing.InOutCubic(t, b, c, d)
-    t = t / d * 2
-    if t < 1 then return c / 2 * t * t * t + b end
-    t = t - 2; return c / 2 * (t * t * t + 2) + b
-end
-
--- Quart
-function Core.Easing.InQuart(t, b, c, d) t = t / d; return c * math.pow(t, 4) + b end
-function Core.Easing.OutQuart(t, b, c, d) t = t / d - 1; return -c * (math.pow(t, 4) - 1) + b end
-function Core.Easing.InOutQuart(t, b, c, d)
-    t = t / d * 2
-    if t < 1 then return c / 2 * math.pow(t, 4) + b end
-    t = t - 2; return -c / 2 * (math.pow(t, 4) - 2) + b
-end
-
--- Quint
-function Core.Easing.InQuint(t, b, c, d) t = t / d; return c * math.pow(t, 5) + b end
-function Core.Easing.OutQuint(t, b, c, d) t = t / d - 1; return c * (math.pow(t, 5) + 1) + b end
-function Core.Easing.InOutQuint(t, b, c, d)
-    t = t / d * 2
-    if t < 1 then return c / 2 * math.pow(t, 5) + b end
-    t = t - 2; return c / 2 * (math.pow(t, 5) + 2) + b
-end
-
--- Expo
-function Core.Easing.InExpo(t, b, c, d)
-    if t == 0 then return b end
-    return c * math.pow(2, 10 * (t / d - 1)) + b - c * 0.001
-end
-function Core.Easing.OutExpo(t, b, c, d)
-    if t == d then return b + c end
-    return c * 1.001 * (-math.pow(2, -10 * t / d) + 1) + b
-end
-function Core.Easing.InOutExpo(t, b, c, d)
-    if t == 0 then return b end
-    if t == d then return b + c end
-    t = t / d * 2
-    if t < 1 then return c / 2 * math.pow(2, 10 * (t - 1)) + b - c * 0.0005 end
-    return c / 2 * 1.0005 * (-math.pow(2, -10 * (t - 1)) + 2) + b
-end
-
--- Circ
-function Core.Easing.InCirc(t, b, c, d) t = t / d; return -c * (math.sqrt(1 - t * t) - 1) + b end
-function Core.Easing.OutCirc(t, b, c, d) t = t / d - 1; return c * math.sqrt(1 - t * t) + b end
-function Core.Easing.InOutCirc(t, b, c, d)
-    t = t / d * 2
-    if t < 1 then return -c / 2 * (math.sqrt(1 - t * t) - 1) + b end
-    t = t - 2; return c / 2 * (math.sqrt(1 - t * t) + 1) + b
-end
-
--- Back
-function Core.Easing.InBack(t, b, c, d, s)
-    if not s then s = 1.70158 end
-    t = t / d; return c * t * t * ((s + 1) * t - s) + b
-end
-function Core.Easing.OutBack(t, b, c, d, s)
-    if not s then s = 1.70158 end
-    t = t / d - 1; return c * (t * t * ((s + 1) * t + s) + 1) + b
-end
-function Core.Easing.InOutBack(t, b, c, d, s)
-    if not s then s = 1.70158 end
-    s = s * 1.525
-    t = t / d * 2
-    if t < 1 then return c / 2 * (t * t * ((s + 1) * t - s)) + b end
-    t = t - 2; return c / 2 * (t * t * ((s + 1) * t + s) + 2) + b
-end
-
--- Bounce
-function Core.Easing.OutBounce(t, b, c, d)
-    t = t / d
-    if t < (1 / 2.75) then return c * (7.5625 * t * t) + b
-    elseif t < (2 / 2.75) then t = t - (1.5 / 2.75); return c * (7.5625 * t * t + 0.75) + b
-    elseif t < (2.5 / 2.75) then t = t - (2.25 / 2.75); return c * (7.5625 * t * t + 0.9375) + b
-    else t = t - (2.625 / 2.75); return c * (7.5625 * t * t + 0.984375) + b end
-end
-function Core.Easing.InBounce(t, b, c, d) return c - Core.Easing.OutBounce(d - t, 0, c, d) + b end
-function Core.Easing.InOutBounce(t, b, c, d)
-    if t < d / 2 then return Core.Easing.InBounce(t * 2, 0, c, d) * 0.5 + b end
-    return Core.Easing.OutBounce(t * 2 - d, 0, c, d) * 0.5 + c * 0.5 + b
-end
-
--- ==============================================================================
--- 🎨 THEME MANAGER (Reatividade Ultrarrápida)
--- ==============================================================================
-function Core:SetTheme(themeName: string, newAccent: Color3?)
-    if newAccent then self.Themes.Accent = newAccent end
-    Core.ThemeSignal:Fire(self.Themes)
-    Core.Logger:Log("Theme Engine Synchronized.")
-end
-
-function Core:SubscribeToTheme(callback: (theme: ColorTheme) -> void)
-    Core.ThemeSignal:Connect(callback)
-    callback(self.Themes) 
-end
-
--- ==============================================================================
--- 🛠️ UTILITIES & ANIMATION MANAGER
--- ==============================================================================
-function Core:Tween(instance: Instance, properties: table, duration: number?, style: Enum.EasingStyle?, direction: Enum.EasingDirection?)
-    local tweenInfo = TweenInfo.new(
-        duration or 0.25,
-        style or Enum.EasingStyle.Quint,
-        direction or Enum.EasingDirection.Out
-    )
-    local tween = TweenService:Create(instance, tweenInfo, properties)
-    tween:Play()
-    return tween
-end
-
-function Core:MakeDraggable(dragArea: Instance, target: Instance, dragSpeed: number?)
-    dragSpeed = dragSpeed or 0.16
-    local dragging = false
-    local dragInput = nil
-    local dragStart = nil
-    local startPos = nil
-
-    dragArea.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = target.Position
-
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-
-    dragArea.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            local targetPosition = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
-            self:Tween(target, {Position = targetPosition}, dragSpeed, Enum.EasingStyle.Sine)
-        end
-    end)
-end
-
--- ==============================================================================
--- 🖱️ CUSTOM CURSOR ENGINE
--- ==============================================================================
-Core.Cursor = { Enabled = false, Instance = nil }
-
-function Core:EnableCustomCursor()
-    if self.Cursor.Enabled or not self.GUI then return end
-    self.Cursor.Enabled = true
-    UserInputService.MouseIconEnabled = false
-
-    local CursorFrame = Instance.new("Frame")
-    CursorFrame.Name = "EvokCursor"
-    CursorFrame.Size = UDim2.new(0, 8, 0, 8)
-    CursorFrame.BackgroundColor3 = self.Themes.Accent
-    CursorFrame.ZIndex = 9999
-    CursorFrame.Parent = self.GUI
-
-    Instance.new("UICorner", CursorFrame).CornerRadius = UDim.new(1, 0)
-    
-    local CursorStroke = Instance.new("UIStroke", CursorFrame)
-    CursorStroke.Color = Color3.fromRGB(0, 0, 0)
-    CursorStroke.Thickness = 1
-
-    self.Cursor.Instance = CursorFrame
-
-    self:SubscribeToTheme(function(theme)
-        if self.Cursor.Instance then self.Cursor.Instance.BackgroundColor3 = theme.Accent end
-    end)
-
-    RunService.RenderStepped:Connect(function()
-        if self.Cursor.Enabled and self.Cursor.Instance then
-            local mouseLoc = UserInputService:GetMouseLocation()
-            self.Cursor.Instance.Position = UDim2.new(0, mouseLoc.X, 0, mouseLoc.Y - 36) 
-        end
-    end)
-
-    UserInputService.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 and self.Cursor.Enabled then
-            self:Tween(CursorFrame, {Size = UDim2.new(0, 5, 0, 5)}, 0.1)
-        end
-    end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 and self.Cursor.Enabled then
-            self:Tween(CursorFrame, {Size = UDim2.new(0, 8, 0, 8)}, 0.1)
-        end
-    end)
-end
-
--- ==============================================================================
--- 💬 TOOLTIP ENGINE (Hover Manager)
--- ==============================================================================
-Core.Tooltip = { Instance = nil, Active = false }
-
-function Core:InitTooltip()
-    if self.Tooltip.Instance or not self.GUI then return end
-
-    local TooltipFrame = Instance.new("Frame")
-    TooltipFrame.Name = "EvokTooltip"
-    TooltipFrame.Size = UDim2.new(0, 0, 0, 25)
-    TooltipFrame.AutomaticSize = Enum.AutomaticSize.X
-    TooltipFrame.BackgroundColor3 = self.Themes.NotificationBg
-    TooltipFrame.Visible = false
-    TooltipFrame.ZIndex = 9990
-    TooltipFrame.Parent = self.GUI
-
-    Instance.new("UICorner", TooltipFrame).CornerRadius = UDim.new(0, 4)
-    local TStroke = Instance.new("UIStroke", TooltipFrame)
-    TStroke.Color = self.Themes.Border
-
-    local TPadding = Instance.new("UIPadding", TooltipFrame)
-    TPadding.PaddingLeft = UDim.new(0, 8)
-    TPadding.PaddingRight = UDim.new(0, 8)
-
-    local TLabel = Instance.new("TextLabel")
-    TLabel.Size = UDim2.new(1, 0, 1, 0)
-    TLabel.BackgroundTransparency = 1
-    TLabel.Text = ""
-    TLabel.TextColor3 = self.Themes.Text
-    TLabel.Font = Enum.Font.Gotham
-    TLabel.TextSize = 12
-    TLabel.Parent = TooltipFrame
-
-    self:SubscribeToTheme(function(theme)
-        TooltipFrame.BackgroundColor3 = theme.NotificationBg
-        TStroke.Color = theme.Border
-        TLabel.TextColor3 = theme.Text
-    end)
-
-    self.Tooltip.Instance = TooltipFrame
-    self.Tooltip.Label = TLabel
-
-    RunService.RenderStepped:Connect(function()
-        if self.Tooltip.Active and self.Tooltip.Instance then
-            local mouseLoc = UserInputService:GetMouseLocation()
-            self.Tooltip.Instance.Position = UDim2.new(0, mouseLoc.X + 15, 0, mouseLoc.Y - 36 + 15)
-        end
-    end)
-end
-
-function Core:AddTooltip(uiElement: Instance, text: string)
-    if not self.Tooltip.Instance then self:InitTooltip() end
-
-    uiElement.MouseEnter:Connect(function()
-        self.Tooltip.Active = true
-        self.Tooltip.Label.Text = text
-        self.Tooltip.Instance.Visible = true
-        self.Tooltip.Instance.BackgroundTransparency = 1
-        self.Tooltip.Label.TextTransparency = 1
+    -- ==============================================================================
+    -- 🌊 RIPPLE PHYSICS ENGINE (Ondulação Suave)
+    -- ==============================================================================
+    local function CreateRipple(Parent: GuiObject, ThemeColor: Color3)
+        local Ripple = Instance.new("Frame")
+        Ripple.Name = "EvokRipple"
+        Ripple.BackgroundColor3 = ThemeColor
+        Ripple.BackgroundTransparency = 0.6
+        Ripple.BorderSizePixel = 0
+        Ripple.ZIndex = Parent.ZIndex + 1
+        Ripple.ClipsDescendants = true
         
-        self:Tween(self.Tooltip.Instance, {BackgroundTransparency = 0}, 0.2)
-        self:Tween(self.Tooltip.Label, {TextTransparency = 0}, 0.2)
-    end)
-
-    uiElement.MouseLeave:Connect(function()
-        self.Tooltip.Active = false
-        self.Tooltip.Instance.Visible = false
-    end)
-end
-
--- ==============================================================================
--- 🔔 NOTIFICATION SYSTEM (Stackable Toasts)
--- ==============================================================================
-function Core:InitNotificationSystem()
-    local NotifyContainer = Instance.new("Frame")
-    NotifyContainer.Name = "EvokNotifyContainer"
-    NotifyContainer.Size = UDim2.new(0, 300, 1, -40)
-    NotifyContainer.Position = UDim2.new(1, -320, 0, 20)
-    NotifyContainer.BackgroundTransparency = 1
-    NotifyContainer.Parent = self.GUI
-
-    local NotifyLayout = Instance.new("UIListLayout")
-    NotifyLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    NotifyLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-    NotifyLayout.Padding = UDim.new(0, 10)
-    NotifyLayout.Parent = NotifyContainer
-
-    self.NotifyContainer = NotifyContainer
-end
-
-function Core:Notify(config)
-    if not self.NotifyContainer then self:InitNotificationSystem() end
-
-    local title = config.Title or "Notification"
-    local text = config.Text or "System Message"
-    local duration = config.Duration or 5
-    local nType = config.Type or "Info" 
-
-    local sideColor = self.Themes.Accent
-    if nType == "Success" then sideColor = self.Themes.Success
-    elseif nType == "Warning" then sideColor = self.Themes.Warning
-    elseif nType == "Error" then sideColor = self.Themes.Error end
-
-    local NotifFrame = Instance.new("Frame")
-    NotifFrame.Size = UDim2.new(1, 0, 0, 0)
-    NotifFrame.AutomaticSize = Enum.AutomaticSize.Y
-    NotifFrame.Position = UDim2.new(1, 350, 0, 0) 
-    NotifFrame.BackgroundColor3 = self.Themes.NotificationBg
-    NotifFrame.Parent = self.NotifyContainer
-
-    Instance.new("UICorner", NotifFrame).CornerRadius = UDim.new(0, 6)
-    local NStroke = Instance.new("UIStroke", NotifFrame)
-    NStroke.Color = self.Themes.Border
-
-    local SideBar = Instance.new("Frame")
-    SideBar.Size = UDim2.new(0, 4, 1, 0)
-    SideBar.BackgroundColor3 = sideColor
-    SideBar.BorderSizePixel = 0
-    SideBar.Parent = NotifFrame
-    Instance.new("UICorner", SideBar).CornerRadius = UDim.new(0, 6)
-
-    local NPadding = Instance.new("UIPadding", NotifFrame)
-    NPadding.PaddingTop = UDim.new(0, 12)
-    NPadding.PaddingBottom = UDim.new(0, 15)
-    NPadding.PaddingLeft = UDim.new(0, 15)
-    NPadding.PaddingRight = UDim.new(0, 15)
-
-    local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1, -10, 0, 16)
-    TitleLabel.Position = UDim2.new(0, 10, 0, 0)
-    TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = title
-    TitleLabel.TextColor3 = self.Themes.Text
-    TitleLabel.Font = Enum.Font.GothamBold
-    TitleLabel.TextSize = 14
-    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLabel.Parent = NotifFrame
-
-    local TextLabel = Instance.new("TextLabel")
-    TextLabel.Size = UDim2.new(1, -10, 0, 0)
-    TextLabel.Position = UDim2.new(0, 10, 0, 22)
-    TextLabel.AutomaticSize = Enum.AutomaticSize.Y
-    TextLabel.BackgroundTransparency = 1
-    TextLabel.Text = text
-    TextLabel.TextColor3 = self.Themes.TextMuted
-    TextLabel.Font = Enum.Font.Gotham
-    TextLabel.TextSize = 13
-    TextLabel.TextWrapped = true
-    TextLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TextLabel.Parent = NotifFrame
-
-    local TimeBarBg = Instance.new("Frame")
-    TimeBarBg.Size = UDim2.new(1, 0, 0, 3)
-    TimeBarBg.Position = UDim2.new(0, 0, 1, -3)
-    TimeBarBg.BackgroundColor3 = self.Themes.Border
-    TimeBarBg.BorderSizePixel = 0
-    TimeBarBg.Parent = NotifFrame
-    Instance.new("UICorner", TimeBarBg).CornerRadius = UDim.new(0, 4)
-
-    local TimeBarFill = Instance.new("Frame")
-    TimeBarFill.Size = UDim2.new(1, 0, 1, 0)
-    TimeBarFill.BackgroundColor3 = sideColor
-    TimeBarFill.BorderSizePixel = 0
-    TimeBarFill.Parent = TimeBarBg
-    Instance.new("UICorner", TimeBarFill).CornerRadius = UDim.new(0, 4)
-
-    self:Tween(NotifFrame, {Position = UDim2.new(0, 0, 0, 0)}, 0.4, Enum.EasingStyle.Back)
-    local barTween = self:Tween(TimeBarFill, {Size = UDim2.new(0, 0, 1, 0)}, duration, Enum.EasingStyle.Linear)
-
-    local closed = false
-    local function CloseNotification()
-        if closed then return end
-        closed = true
-        barTween:Cancel()
-        local outTween = self:Tween(NotifFrame, {Position = UDim2.new(1, 350, 0, 0)}, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In)
-        outTween.Completed:Wait()
-        NotifFrame:Destroy()
+        Instance.new("UICorner", Ripple).CornerRadius = UDim.new(1, 0)
+        
+        local mousePos = UserInputService:GetMouseLocation()
+        local absoluteSize = Parent.AbsoluteSize
+        local absolutePos = Parent.AbsolutePosition
+        
+        local relativeX = mousePos.X - absolutePos.X
+        local relativeY = (mousePos.Y - 36) - absolutePos.Y
+        local size = math.max(absoluteSize.X, absoluteSize.Y) * 1.5
+        
+        Ripple.Size = UDim2.new(0, 0, 0, 0)
+        Ripple.Position = UDim2.new(0, relativeX, 0, relativeY)
+        Ripple.AnchorPoint = Vector2.new(0.5, 0.5)
+        Ripple.Parent = Parent
+        
+        local tween = TweenService:Create(Ripple, TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, size, 0, size), BackgroundTransparency = 1
+        })
+        tween:Play()
+        tween.Completed:Connect(function() Ripple:Destroy() end)
     end
 
-    local ClickBtn = Instance.new("TextButton")
-    ClickBtn.Size = UDim2.new(1, 0, 1, 0)
-    ClickBtn.BackgroundTransparency = 1
-    ClickBtn.Text = ""
-    ClickBtn.ZIndex = 10
-    ClickBtn.Parent = NotifFrame
-    ClickBtn.MouseButton1Click:Connect(CloseNotification)
+    -- ==============================================================================
+    -- 📑 TAB SYSTEM (Top Navigation Horizontal)
+    -- ==============================================================================
+    function WindowInstance:CreateTab(name: string)
+        local Window = self
+        local Tab = { Sections = {}, Elements = {} }
+        
+        local TabBtn = Instance.new("TextButton")
+        TabBtn.Name = name .. "_TabBtn"
+        TabBtn.AutomaticSize = Enum.AutomaticSize.X
+        TabBtn.Size = UDim2.new(0, 0, 1, 0) 
+        TabBtn.BackgroundTransparency = 1
+        TabBtn.Text = name
+        TabBtn.Font = Enum.Font.GothamSemibold
+        TabBtn.TextSize = 13
+        TabBtn.TextColor3 = Core.Themes.TextMuted
+        TabBtn.AutoButtonColor = false
+        TabBtn.Parent = Window.TabContainer
 
-    task.delay(duration, CloseNotification)
-end
+        local Indicator = Instance.new("Frame")
+        Indicator.Size = UDim2.new(0, 0, 0, 2)
+        Indicator.Position = UDim2.new(0.5, 0, 1, -2)
+        Indicator.AnchorPoint = Vector2.new(0.5, 0)
+        Indicator.BackgroundColor3 = Core.Themes.Accent
+        Indicator.BorderSizePixel = 0
+        Indicator.Parent = TabBtn
+        Instance.new("UICorner", Indicator).CornerRadius = UDim.new(1, 0)
 
--- ==============================================================================
--- 🖼️ WINDOW MANAGER (BUILDER ENGINE)
--- Design: Matcha Style (Top Navigation), Dark/Pink, 650x600
--- ==============================================================================
-function Core:CreateWindow(config)
-    Core.Logger:Log("Initializing Evok Window Manager (Matcha Design)...")
-    
-    local title = config.Title or "Evok - Zynn Love you <3"
-    local size = config.Size or UDim2.new(0, 650, 0, 600) 
-    
-    local targetGui
-    if pcall(function() return CoreGui.Name end) then
-        targetGui = CoreGui
-    else
-        targetGui = LocalPlayer:WaitForChild("PlayerGui")
-    end
+        local Page = Instance.new("ScrollingFrame")
+        Page.Name = name .. "_Page"
+        Page.Size = UDim2.new(1, 0, 1, 0)
+        Page.BackgroundTransparency = 1
+        Page.ScrollBarThickness = 2
+        Page.ScrollBarImageColor3 = Core.Themes.Border
+        Page.BorderSizePixel = 0
+        Page.Visible = false
+        Page.Parent = Window.PageContainer
 
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "EvokUI_" .. HttpService:GenerateGUID(false)
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-    ScreenGui.Parent = targetGui
-    self.GUI = ScreenGui
+        local PagePadding = Instance.new("UIPadding", Page)
+        PagePadding.PaddingTop = UDim.new(0, 10)
+        PagePadding.PaddingBottom = UDim.new(0, 10)
+        PagePadding.PaddingLeft = UDim.new(0, 15)
+        PagePadding.PaddingRight = UDim.new(0, 15)
 
-    local MainFrame = Instance.new("Frame")
-    MainFrame.Name = "MainFrame"
-    MainFrame.Size = size
-    MainFrame.Position = UDim2.new(0.5, -size.X.Offset/2, 0.5, -size.Y.Offset/2)
-    MainFrame.BackgroundColor3 = self.Themes.Background
-    MainFrame.BorderSizePixel = 0
-    MainFrame.ClipsDescendants = true
-    MainFrame.Parent = ScreenGui
+        local LeftCol = Instance.new("Frame")
+        LeftCol.Name = "LeftColumn"
+        LeftCol.Size = UDim2.new(0.5, -5, 1, 0)
+        LeftCol.BackgroundTransparency = 1
+        LeftCol.Parent = Page
+        
+        local LeftLayout = Instance.new("UIListLayout", LeftCol)
+        LeftLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        LeftLayout.Padding = UDim.new(0, 10)
 
-    local MainCorner = Instance.new("UICorner")
-    MainCorner.CornerRadius = UDim.new(0, 8)
-    MainCorner.Parent = MainFrame
+        local RightCol = Instance.new("Frame")
+        RightCol.Name = "RightColumn"
+        RightCol.Size = UDim2.new(0.5, -5, 1, 0)
+        RightCol.Position = UDim2.new(0.5, 5, 0, 0)
+        RightCol.BackgroundTransparency = 1
+        RightCol.Parent = Page
+        
+        local RightLayout = Instance.new("UIListLayout", RightCol)
+        RightLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        RightLayout.Padding = UDim.new(0, 10)
 
-    local MainStroke = Instance.new("UIStroke")
-    MainStroke.Color = self.Themes.Border
-    MainStroke.Thickness = 1
-    MainStroke.Parent = MainFrame
-
-    -- ==========================================
-    -- TOP BAR (Title + Tab Navigation)
-    -- ==========================================
-    local TopBar = Instance.new("Frame")
-    TopBar.Name = "TopBar"
-    TopBar.Size = UDim2.new(1, 0, 0, 70)
-    TopBar.BackgroundColor3 = self.Themes.TopBar
-    TopBar.BorderSizePixel = 0
-    TopBar.Parent = MainFrame
-
-    local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Name = "Title"
-    TitleLabel.Size = UDim2.new(1, -30, 0, 30)
-    TitleLabel.Position = UDim2.new(0, 15, 0, 5)
-    TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = title
-    TitleLabel.TextColor3 = self.Themes.TextMuted
-    TitleLabel.Font = Enum.Font.GothamSemibold
-    TitleLabel.TextSize = 13
-    TitleLabel.RichText = true
-    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLabel.Parent = TopBar
-    
-    -- Replace the first word with Accent color for Matcha feel
-    local firstWord, rest = title:match("([^%s]+)(.*)")
-    if firstWord then
-        TitleLabel.Text = string.format("<font color='%s'>%s</font>%s", self.Math.Color.ToHex(self.Themes.Accent), firstWord, rest)
-    end
-
-    local TabContainer = Instance.new("Frame")
-    TabContainer.Name = "TabContainer"
-    TabContainer.Size = UDim2.new(1, -30, 0, 30)
-    TabContainer.Position = UDim2.new(0, 15, 0, 35)
-    TabContainer.BackgroundTransparency = 1
-    TabContainer.Parent = TopBar
-    
-    local TabListLayout = Instance.new("UIListLayout")
-    TabListLayout.FillDirection = Enum.FillDirection.Horizontal
-    TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    TabListLayout.Padding = UDim.new(0, 15)
-    TabListLayout.Parent = TabContainer
-
-    local TopLine = Instance.new("Frame")
-    TopLine.Size = UDim2.new(1, 0, 0, 1)
-    TopLine.Position = UDim2.new(0, 0, 1, -1)
-    TopLine.BackgroundColor3 = self.Themes.Border
-    TopLine.BorderSizePixel = 0
-    TopLine.Parent = TopBar
-
-    -- ==========================================
-    -- PAGE CONTAINER
-    -- ==========================================
-    local PageContainer = Instance.new("Frame")
-    PageContainer.Name = "PageContainer"
-    PageContainer.Size = UDim2.new(1, -20, 1, -80)
-    PageContainer.Position = UDim2.new(0, 10, 0, 75)
-    PageContainer.BackgroundTransparency = 1
-    PageContainer.Parent = MainFrame
-
-    self:MakeDraggable(TopBar, MainFrame)
-
-    self:SubscribeToTheme(function(theme)
-        MainFrame.BackgroundColor3 = theme.Background
-        MainStroke.Color = theme.Border
-        TopBar.BackgroundColor3 = theme.TopBar
-        TopLine.BackgroundColor3 = theme.Border
-        if firstWord then
-            TitleLabel.Text = string.format("<font color='%s'>%s</font>%s", self.Math.Color.ToHex(theme.Accent), firstWord, rest)
+        local function UpdateCanvas()
+            local leftSize = LeftLayout.AbsoluteContentSize.Y
+            local rightSize = RightLayout.AbsoluteContentSize.Y
+            Page.CanvasSize = UDim2.new(0, 0, 0, math.max(leftSize, rightSize) + 20)
         end
-    end)
+        LeftLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateCanvas)
+        RightLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateCanvas)
 
-    MainFrame.Size = UDim2.new(0, 0, 0, 0)
-    self:Tween(MainFrame, {Size = size}, 0.5, Enum.EasingStyle.Quint)
+        TabBtn.MouseEnter:Connect(function()
+            if Window.CurrentTab ~= Tab then Core:Tween(TabBtn, {TextColor3 = Core.Themes.Text}, 0.15) end
+        end)
+        TabBtn.MouseLeave:Connect(function()
+            if Window.CurrentTab ~= Tab then Core:Tween(TabBtn, {TextColor3 = Core.Themes.TextMuted}, 0.15) end
+        end)
 
-    return {
-        Core = self,
-        GUI = ScreenGui,
-        MainFrame = MainFrame,
-        TopBar = TopBar, 
-        TabContainer = TabContainer,
-        PageContainer = PageContainer,
-        Tabs = {},
-        CurrentTab = nil
-    }
+        TabBtn.MouseButton1Click:Connect(function()
+            if Window.CurrentTab == Tab then return end
+            CreateRipple(TabBtn, Core.Themes.TextMuted)
+
+            for _, t in pairs(Window.Tabs) do
+                t.Page.Visible = false
+                Core:Tween(t.Btn, {TextColor3 = Core.Themes.TextMuted}, 0.2)
+                Core:Tween(t.Indicator, {Size = UDim2.new(0, 0, 0, 2)}, 0.2)
+            end
+
+            Page.Visible = true
+            Core:Tween(TabBtn, {TextColor3 = Core.Themes.Text}, 0.2)
+            Core:Tween(Indicator, {Size = UDim2.new(0.6, 0, 0, 2)}, 0.2, Enum.EasingStyle.Back)
+            Window.CurrentTab = Tab
+        end)
+
+        if #Window.Tabs == 0 then
+            Page.Visible = true
+            TabBtn.TextColor3 = Core.Themes.Text
+            Indicator.Size = UDim2.new(0.6, 0, 0, 2)
+            Window.CurrentTab = Tab
+        end
+
+        Core:SubscribeToTheme(function(theme)
+            Page.ScrollBarImageColor3 = theme.Border
+            Indicator.BackgroundColor3 = theme.Accent
+            if Window.CurrentTab == Tab then TabBtn.TextColor3 = theme.Text else TabBtn.TextColor3 = theme.TextMuted end
+        end)
+
+        table.insert(Window.Tabs, {Btn = TabBtn, Page = Page, Indicator = Indicator})
+
+        -- ==============================================================================
+        -- 🧩 SECTION SYSTEM (Estilo Matcha: Container Arredondado Escuro)
+        -- ==============================================================================
+        function Tab:CreateSection(secName: string, side: string)
+            local Section = {}
+            local parentCol = (side and side:lower() == "left") and LeftCol or RightCol
+
+            local SecFrame = Instance.new("Frame")
+            SecFrame.Name = secName .. "_Section"
+            SecFrame.Size = UDim2.new(1, 0, 0, 0)
+            SecFrame.AutomaticSize = Enum.AutomaticSize.Y
+            SecFrame.BackgroundColor3 = Core.Themes.Container
+            SecFrame.Parent = parentCol
+            
+            Instance.new("UICorner", SecFrame).CornerRadius = UDim.new(0, 6)
+            local SecStroke = Instance.new("UIStroke", SecFrame)
+            SecStroke.Color = Core.Themes.Border
+
+            local SecPadding = Instance.new("UIPadding", SecFrame)
+            SecPadding.PaddingTop = UDim.new(0, 10)
+            SecPadding.PaddingBottom = UDim.new(0, 10)
+            SecPadding.PaddingLeft = UDim.new(0, 12)
+            SecPadding.PaddingRight = UDim.new(0, 12)
+
+            local SecLayout = Instance.new("UIListLayout", SecFrame)
+            SecLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            SecLayout.Padding = UDim.new(0, 8)
+
+            local SecTitle = Instance.new("TextLabel")
+            SecTitle.Size = UDim2.new(1, 0, 0, 20)
+            SecTitle.BackgroundTransparency = 1
+            SecTitle.Text = secName
+            SecTitle.TextColor3 = Core.Themes.Text
+            SecTitle.Font = Enum.Font.GothamBold
+            SecTitle.TextSize = 13
+            SecTitle.TextXAlignment = Enum.TextXAlignment.Left
+            SecTitle.Parent = SecFrame
+
+            local LineSep = Instance.new("Frame")
+            LineSep.Size = UDim2.new(1, 0, 0, 1)
+            LineSep.BackgroundColor3 = Core.Themes.Border
+            LineSep.BorderSizePixel = 0
+            LineSep.Parent = SecFrame
+
+            Core:SubscribeToTheme(function(theme)
+                SecFrame.BackgroundColor3 = theme.Container
+                SecStroke.Color = theme.Border
+                SecTitle.TextColor3 = theme.Text
+                LineSep.BackgroundColor3 = theme.Border
+            end)
+
+            Section.Container = SecFrame
+
+            -- ==============================================================================
+            -- 📝 WIDGET: LABEL & PARAGRAPH
+            -- ==============================================================================
+            function Section:CreateLabel(opts)
+                local Lbl = { Text = opts.Name or "Label" }
+                local LblFrame = Instance.new("Frame")
+                LblFrame.Size = UDim2.new(1, 0, 0, 20)
+                LblFrame.BackgroundTransparency = 1
+                LblFrame.Parent = SecFrame
+                
+                local TextObj = Instance.new("TextLabel")
+                TextObj.Size = UDim2.new(1, 0, 1, 0)
+                TextObj.BackgroundTransparency = 1
+                TextObj.Text = Lbl.Text
+                TextObj.TextColor3 = Core.Themes.TextMuted
+                TextObj.Font = Enum.Font.Gotham
+                TextObj.TextSize = 12
+                TextObj.TextWrapped = true
+                TextObj.TextXAlignment = Enum.TextXAlignment.Left
+                TextObj.Parent = LblFrame
+                
+                TextObj:GetPropertyChangedSignal("TextBounds"):Connect(function()
+                    LblFrame.Size = UDim2.new(1, 0, 0, TextObj.TextBounds.Y)
+                end)
+
+                function Lbl:Set(t) TextObj.Text = t end
+                Core:SubscribeToTheme(function(theme) TextObj.TextColor3 = theme.TextMuted end)
+                return Lbl
+            end
+
+            -- ==============================================================================
+            -- 🟩 WIDGET: BUTTON
+            -- ==============================================================================
+            function Section:CreateButton(opts: ButtonConfig)
+                local Button = { Locked = false }
+                local callback = opts.Callback or function() end
+                
+                local BtnFrame = Instance.new("Frame")
+                BtnFrame.Size = UDim2.new(1, 0, 0, 30)
+                BtnFrame.BackgroundColor3 = Core.Themes.Background
+                BtnFrame.Parent = SecFrame
+                Instance.new("UICorner", BtnFrame).CornerRadius = UDim.new(0, 4)
+                local BtnStroke = Instance.new("UIStroke", BtnFrame)
+                BtnStroke.Color = Core.Themes.Border
+                
+                local ClickBtn = Instance.new("TextButton")
+                ClickBtn.Size = UDim2.new(1, 0, 1, 0)
+                ClickBtn.BackgroundTransparency = 1
+                ClickBtn.Text = opts.Name or "Button"
+                ClickBtn.TextColor3 = Core.Themes.Text
+                ClickBtn.Font = Enum.Font.GothamSemibold
+                ClickBtn.TextSize = 12
+                ClickBtn.AutoButtonColor = false
+                ClickBtn.Parent = BtnFrame
+
+                if opts.Tooltip then Core:AddTooltip(ClickBtn, opts.Tooltip) end
+
+                ClickBtn.MouseEnter:Connect(function()
+                    if not Button.Locked then Core:Tween(BtnStroke, {Color = Core.Themes.Accent}, 0.2) end
+                end)
+                ClickBtn.MouseLeave:Connect(function()
+                    if not Button.Locked then Core:Tween(BtnStroke, {Color = Core.Themes.Border}, 0.2) end
+                end)
+
+                ClickBtn.MouseButton1Click:Connect(function()
+                    if Button.Locked then return end
+                    CreateRipple(ClickBtn, Core.Themes.Accent)
+                    task.spawn(callback)
+                    
+                    if opts.Cooldown then
+                        Button.Locked = true
+                        local originalText = ClickBtn.Text
+                        ClickBtn.Text = "..."
+                        Core:Tween(BtnStroke, {Color = Core.Themes.Border}, 0.2)
+                        Core:Tween(ClickBtn, {TextColor3 = Core.Themes.TextMuted}, 0.2)
+                        task.wait(opts.Cooldown)
+                        Button.Locked = false
+                        ClickBtn.Text = originalText
+                        Core:Tween(ClickBtn, {TextColor3 = Core.Themes.Text}, 0.2)
+                    end
+                end)
+
+                Core:SubscribeToTheme(function(theme)
+                    BtnFrame.BackgroundColor3 = theme.Background
+                    ClickBtn.TextColor3 = theme.Text
+                    if not Button.Locked then BtnStroke.Color = theme.Border end
+                end)
+
+                return Button
+            end
+
+            -- ==============================================================================
+            -- 🔘 WIDGET: TOGGLE (Matcha Style - Circle inside Pill)
+            -- ==============================================================================
+            function Section:CreateToggle(opts: ToggleConfig)
+                local Toggle = { State = opts.Default or false }
+                local callback = opts.Callback or function() end
+
+                local ToggleBtn = Instance.new("TextButton")
+                ToggleBtn.Size = UDim2.new(1, 0, 0, 24)
+                ToggleBtn.BackgroundTransparency = 1
+                ToggleBtn.Text = ""
+                ToggleBtn.AutoButtonColor = false
+                ToggleBtn.Parent = SecFrame
+
+                if opts.Tooltip then Core:AddTooltip(ToggleBtn, opts.Tooltip) end
+
+                local Label = Instance.new("TextLabel")
+                Label.Size = UDim2.new(1, -45, 1, 0)
+                Label.BackgroundTransparency = 1
+                Label.Text = opts.Name
+                Label.TextColor3 = Toggle.State and Core.Themes.Text or Core.Themes.TextMuted
+                Label.Font = Enum.Font.Gotham
+                Label.TextSize = 12
+                Label.TextXAlignment = Enum.TextXAlignment.Left
+                Label.Parent = ToggleBtn
+
+                local Outer = Instance.new("Frame")
+                Outer.Size = UDim2.new(0, 36, 0, 18)
+                Outer.AnchorPoint = Vector2.new(1, 0.5)
+                Outer.Position = UDim2.new(1, 0, 0.5, 0)
+                Outer.BackgroundColor3 = Toggle.State and Core.Themes.Accent or Core.Themes.Background
+                Outer.Parent = ToggleBtn
+                Instance.new("UICorner", Outer).CornerRadius = UDim.new(1, 0)
+                local OuterStroke = Instance.new("UIStroke", Outer)
+                OuterStroke.Color = Toggle.State and Core.Themes.Accent or Core.Themes.Border
+
+                local Inner = Instance.new("Frame")
+                Inner.Size = UDim2.new(0, 14, 0, 14)
+                Inner.Position = Toggle.State and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+                Inner.BackgroundColor3 = Toggle.State and Color3.fromRGB(255, 255, 255) or Core.Themes.TextMuted
+                Inner.Parent = Outer
+                Instance.new("UICorner", Inner).CornerRadius = UDim.new(1, 0)
+
+                function Toggle:Set(newState: boolean, skipCallback: boolean)
+                    Toggle.State = newState
+                    local targetColor = Toggle.State and Core.Themes.Accent or Core.Themes.Background
+                    local targetPos = Toggle.State and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+                    local targetInnerColor = Toggle.State and Color3.fromRGB(255, 255, 255) or Core.Themes.TextMuted
+                    
+                    Core:Tween(Outer, {BackgroundColor3 = targetColor}, 0.25)
+                    Core:Tween(OuterStroke, {Color = Toggle.State and Core.Themes.Accent or Core.Themes.Border}, 0.25)
+                    Core:Tween(Inner, {Position = targetPos, BackgroundColor3 = targetInnerColor}, 0.3, Enum.EasingStyle.Back)
+                    Core:Tween(Label, {TextColor3 = Toggle.State and Core.Themes.Text or Core.Themes.TextMuted}, 0.2)
+                    
+                    if not skipCallback then task.spawn(callback, Toggle.State) end
+                end
+
+                ToggleBtn.MouseButton1Click:Connect(function() Toggle:Set(not Toggle.State) end)
+
+                Core:SubscribeToTheme(function(theme)
+                    if Toggle.State then
+                        Outer.BackgroundColor3 = theme.Accent
+                        OuterStroke.Color = theme.Accent
+                        Label.TextColor3 = theme.Text
+                        Inner.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                    else
+                        Outer.BackgroundColor3 = theme.Background
+                        OuterStroke.Color = theme.Border
+                        Label.TextColor3 = theme.TextMuted
+                        Inner.BackgroundColor3 = theme.TextMuted
+                    end
+                end)
+
+                if Toggle.State then task.spawn(callback, true) end
+                return Toggle
+            end
+
+            -- ==============================================================================
+            -- 🎚️ WIDGET: SLIDER (Matcha Style)
+            -- ==============================================================================
+            function Section:CreateSlider(opts: SliderConfig)
+                local min, max = opts.Min or 0, opts.Max or 100
+                local step = opts.Step or 1
+                local Slider = { Value = math.clamp(opts.Default or min, min, max) }
+                local callback = opts.Callback or function() end
+
+                local SliderFrame = Instance.new("Frame")
+                SliderFrame.Size = UDim2.new(1, 0, 0, 40)
+                SliderFrame.BackgroundTransparency = 1
+                SliderFrame.Parent = SecFrame
+
+                if opts.Tooltip then Core:AddTooltip(SliderFrame, opts.Tooltip) end
+
+                local Label = Instance.new("TextLabel")
+                Label.Size = UDim2.new(1, -50, 0, 15)
+                Label.BackgroundTransparency = 1
+                Label.Text = opts.Name
+                Label.TextColor3 = Core.Themes.TextMuted
+                Label.Font = Enum.Font.Gotham
+                Label.TextSize = 12
+                Label.TextXAlignment = Enum.TextXAlignment.Left
+                Label.Parent = SliderFrame
+
+                local ValLabel = Instance.new("TextLabel")
+                ValLabel.Size = UDim2.new(0, 50, 0, 15)
+                ValLabel.Position = UDim2.new(1, -50, 0, 0)
+                ValLabel.BackgroundTransparency = 1
+                ValLabel.Text = tostring(Slider.Value) .. "/" .. tostring(max)
+                ValLabel.TextColor3 = Core.Themes.Text
+                ValLabel.Font = Enum.Font.Gotham
+                ValLabel.TextSize = 11
+                ValLabel.TextXAlignment = Enum.TextXAlignment.Right
+                ValLabel.Parent = SliderFrame
+
+                local BarBg = Instance.new("TextButton")
+                BarBg.Size = UDim2.new(1, 0, 0, 10)
+                BarBg.Position = UDim2.new(0, 0, 1, -12)
+                BarBg.BackgroundColor3 = Core.Themes.Background
+                BarBg.Text = ""
+                BarBg.AutoButtonColor = false
+                BarBg.Parent = SliderFrame
+                Instance.new("UICorner", BarBg).CornerRadius = UDim.new(1, 0)
+                local BarStroke = Instance.new("UIStroke", BarBg)
+                BarStroke.Color = Core.Themes.Border
+
+                local Fill = Instance.new("Frame")
+                local percent = (Slider.Value - min) / (max - min)
+                Fill.Size = UDim2.new(percent, 0, 1, 0)
+                Fill.BackgroundColor3 = Core.Themes.Accent
+                Fill.Parent = BarBg
+                Instance.new("UICorner", Fill).CornerRadius = UDim.new(1, 0)
+
+                local function RoundStep(val, s) return math.floor((val / s) + 0.5) * s end
+
+                function Slider:Set(newVal: number, skipCallback: boolean)
+                    local num = math.clamp(RoundStep(tonumber(newVal) or Slider.Value, step), min, max)
+                    Slider.Value = num
+                    local p = (Slider.Value - min) / (max - min)
+                    
+                    Core:Tween(Fill, {Size = UDim2.new(p, 0, 1, 0)}, 0.15, Enum.EasingStyle.Quad)
+                    
+                    local displayStr = tostring(Slider.Value)
+                    if step == math.floor(step) then displayStr = tostring(math.floor(Slider.Value)) end
+                    ValLabel.Text = displayStr .. "/" .. tostring(max)
+                    
+                    if not skipCallback then task.spawn(callback, Slider.Value) end
+                end
+
+                local sliding = false
+                local function UpdateSlider(input)
+                    local p = math.clamp((input.Position.X - BarBg.AbsolutePosition.X) / BarBg.AbsoluteSize.X, 0, 1)
+                    local rawVal = min + ((max - min) * p)
+                    Slider:Set(rawVal)
+                end
+
+                BarBg.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        sliding = true; UpdateSlider(input)
+                        Core:Tween(Fill, {BackgroundColor3 = Core.Math.Color.Lighten(Core.Themes.Accent, 0.1)}, 0.2)
+                        Core:Tween(BarStroke, {Color = Core.Themes.Accent}, 0.2)
+                    end
+                end)
+                UserInputService.InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 and sliding then
+                        sliding = false
+                        Core:Tween(Fill, {BackgroundColor3 = Core.Themes.Accent}, 0.2)
+                        Core:Tween(BarStroke, {Color = Core.Themes.Border}, 0.2)
+                    end
+                end)
+                UserInputService.InputChanged:Connect(function(input)
+                    if sliding and input.UserInputType == Enum.UserInputType.MouseMovement then UpdateSlider(input) end
+                end)
+
+                Core:SubscribeToTheme(function(theme)
+                    Label.TextColor3 = theme.TextMuted
+                    ValLabel.TextColor3 = theme.Text
+                    BarBg.BackgroundColor3 = theme.Background
+                    if not sliding then 
+                        Fill.BackgroundColor3 = theme.Accent 
+                        BarStroke.Color = theme.Border
+                    end
+                end)
+
+                task.spawn(callback, Slider.Value)
+                return Slider
+            end
+
+            -- ==============================================================================
+            -- 📜 WIDGET: DROPDOWN (Menu de Seleção)
+            -- ==============================================================================
+            function Section:CreateDropdown(opts: DropdownConfig)
+                local Dropdown = { Options = opts.Options or {}, Selected = opts.Default, Open = false }
+                local callback = opts.Callback or function() end
+
+                local DropFrame = Instance.new("Frame")
+                DropFrame.Size = UDim2.new(1, 0, 0, 32)
+                DropFrame.BackgroundColor3 = Core.Themes.Background
+                DropFrame.ClipsDescendants = true
+                DropFrame.Parent = SecFrame
+                Instance.new("UICorner", DropFrame).CornerRadius = UDim.new(0, 4)
+                local DropStroke = Instance.new("UIStroke", DropFrame)
+                DropStroke.Color = Core.Themes.Border
+
+                if opts.Tooltip then Core:AddTooltip(DropFrame, opts.Tooltip) end
+
+                local MainBtn = Instance.new("TextButton")
+                MainBtn.Size = UDim2.new(1, 0, 0, 32)
+                MainBtn.BackgroundTransparency = 1
+                MainBtn.Text = ""
+                MainBtn.Parent = DropFrame
+
+                local Label = Instance.new("TextLabel")
+                Label.Size = UDim2.new(1, -30, 1, 0)
+                Label.Position = UDim2.new(0, 10, 0, 0)
+                Label.BackgroundTransparency = 1
+                Label.Text = opts.Name .. "  :  " .. tostring(Dropdown.Selected or "None")
+                Label.TextColor3 = Core.Themes.TextMuted
+                Label.Font = Enum.Font.Gotham
+                Label.TextSize = 12
+                Label.TextXAlignment = Enum.TextXAlignment.Left
+                Label.RichText = true
+                Label.Parent = MainBtn
+
+                local Icon = Instance.new("TextLabel")
+                Icon.Size = UDim2.new(0, 20, 0, 20)
+                Icon.Position = UDim2.new(1, -25, 0.5, -10)
+                Icon.BackgroundTransparency = 1
+                Icon.Text = "▼"
+                Icon.TextColor3 = Core.Themes.TextMuted
+                Icon.Font = Enum.Font.GothamBold
+                Icon.TextSize = 10
+                Icon.Parent = MainBtn
+
+                local ScrollContainer = Instance.new("ScrollingFrame")
+                ScrollContainer.Size = UDim2.new(1, 0, 1, -32)
+                ScrollContainer.Position = UDim2.new(0, 0, 0, 32)
+                ScrollContainer.BackgroundTransparency = 1
+                ScrollContainer.ScrollBarThickness = 2
+                ScrollContainer.ScrollBarImageColor3 = Core.Themes.Border
+                ScrollContainer.Parent = DropFrame
+                
+                local ListLayout = Instance.new("UIListLayout", ScrollContainer)
+                ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+                local function ToggleDrop()
+                    Dropdown.Open = not Dropdown.Open
+                    Icon.Text = Dropdown.Open and "▲" or "▼"
+                    SecFrame.ZIndex = Dropdown.Open and 5 or 1
+                    DropFrame.ZIndex = Dropdown.Open and 5 or 1
+                    
+                    local maxItems = 5
+                    local itemsCount = math.min(#Dropdown.Options, maxItems)
+                    local targetSize = Dropdown.Open and UDim2.new(1, 0, 0, 32 + (itemsCount * 22)) or UDim2.new(1, 0, 0, 32)
+                    
+                    ScrollContainer.CanvasSize = UDim2.new(0, 0, 0, #Dropdown.Options * 22)
+                    Core:Tween(DropFrame, {Size = targetSize}, 0.25, Enum.EasingStyle.Quint)
+                end
+
+                MainBtn.MouseButton1Click:Connect(ToggleDrop)
+
+                function Dropdown:Refresh(newOptions)
+                    Dropdown.Options = newOptions
+                    for _, child in pairs(ScrollContainer:GetChildren()) do
+                        if child:IsA("TextButton") then child:Destroy() end
+                    end
+
+                    for _, opt in ipairs(Dropdown.Options) do
+                        local OptBtn = Instance.new("TextButton")
+                        OptBtn.Size = UDim2.new(1, 0, 0, 22)
+                        OptBtn.BackgroundTransparency = 1
+                        OptBtn.Text = "   " .. tostring(opt)
+                        OptBtn.TextColor3 = (Dropdown.Selected == opt) and Core.Themes.Accent or Core.Themes.Text
+                        OptBtn.Font = Enum.Font.Gotham
+                        OptBtn.TextSize = 12
+                        OptBtn.TextXAlignment = Enum.TextXAlignment.Left
+                        OptBtn.Parent = ScrollContainer
+
+                        OptBtn.MouseButton1Click:Connect(function()
+                            Dropdown.Selected = opt
+                            Label.Text = string.format("%s  :  <font color='%s'>%s</font>", opts.Name, Core.Math.Color.ToHex(Core.Themes.Accent), tostring(opt))
+                            task.spawn(callback, opt)
+                            ToggleDrop()
+                            Dropdown:Refresh(Dropdown.Options)
+                        end)
+                    end
+                end
+
+                Core:SubscribeToTheme(function(theme)
+                    DropFrame.BackgroundColor3 = theme.Background
+                    DropStroke.Color = theme.Border
+                    Label.TextColor3 = theme.TextMuted
+                    Icon.TextColor3 = theme.TextMuted
+                    ScrollContainer.ScrollBarImageColor3 = theme.Border
+                    Dropdown:Refresh(Dropdown.Options)
+                    if Dropdown.Selected then
+                        Label.Text = string.format("%s  :  <font color='%s'>%s</font>", opts.Name, Core.Math.Color.ToHex(theme.Accent), tostring(Dropdown.Selected))
+                    end
+                end)
+
+                Dropdown:Refresh(Dropdown.Options)
+                if Dropdown.Selected then task.spawn(callback, Dropdown.Selected) end
+                return Dropdown
+            end
+
+            -- ==============================================================================
+            -- ⌨️ WIDGET: KEYBIND (Escuta de Teclas)
+            -- ==============================================================================
+            function Section:CreateKeybind(opts: KeybindConfig)
+                local Keybind = { Key = opts.Default or Enum.KeyCode.Unknown, Listening = false, State = false, Mode = opts.Mode or "Toggle" }
+                local callback = opts.Callback or function() end
+
+                local KeyFrame = Instance.new("Frame")
+                KeyFrame.Size = UDim2.new(1, 0, 0, 26)
+                KeyFrame.BackgroundTransparency = 1
+                KeyFrame.Parent = SecFrame
+
+                local Label = Instance.new("TextLabel")
+                Label.Size = UDim2.new(1, -70, 1, 0)
+                Label.BackgroundTransparency = 1
+                Label.Text = opts.Name
+                Label.TextColor3 = Core.Themes.TextMuted
+                Label.Font = Enum.Font.Gotham
+                Label.TextSize = 12
+                Label.TextXAlignment = Enum.TextXAlignment.Left
+                Label.Parent = KeyFrame
+
+                local BindBtn = Instance.new("TextButton")
+                BindBtn.Size = UDim2.new(0, 60, 0, 20)
+                BindBtn.Position = UDim2.new(1, -60, 0.5, -10)
+                BindBtn.BackgroundColor3 = Core.Themes.Background
+                BindBtn.Text = Keybind.Key == Enum.KeyCode.Unknown and "None" or Keybind.Key.Name
+                BindBtn.TextColor3 = Core.Themes.Text
+                BindBtn.Font = Enum.Font.Gotham
+                BindBtn.TextSize = 11
+                BindBtn.Parent = KeyFrame
+                Instance.new("UICorner", BindBtn).CornerRadius = UDim.new(0, 4)
+                local BindStroke = Instance.new("UIStroke", BindBtn)
+                BindStroke.Color = Core.Themes.Border
+
+                BindBtn.MouseButton1Click:Connect(function()
+                    Keybind.Listening = true
+                    BindBtn.Text = "..."
+                    Core:Tween(BindStroke, {Color = Core.Themes.Accent}, 0.2)
+                end)
+
+                UserInputService.InputBegan:Connect(function(input, gpe)
+                    if Keybind.Listening and input.UserInputType == Enum.UserInputType.Keyboard then
+                        local key = input.KeyCode
+                        if key == Enum.KeyCode.Escape or key == Enum.KeyCode.Backspace then
+                            Keybind.Key = Enum.KeyCode.Unknown
+                            BindBtn.Text = "None"
+                        else
+                            Keybind.Key = key
+                            BindBtn.Text = key.Name
+                        end
+                        Keybind.Listening = false
+                        Core:Tween(BindStroke, {Color = Core.Themes.Border}, 0.2)
+                    elseif not gpe and input.KeyCode == Keybind.Key and Keybind.Key ~= Enum.KeyCode.Unknown then
+                        if Keybind.Mode == "Toggle" then
+                            Keybind.State = not Keybind.State
+                            task.spawn(callback, Keybind.State)
+                        elseif Keybind.Mode == "Hold" then
+                            Keybind.State = true
+                            task.spawn(callback, true)
+                        end
+                    end
+                end)
+
+                UserInputService.InputEnded:Connect(function(input, gpe)
+                    if not gpe and input.KeyCode == Keybind.Key and Keybind.Mode == "Hold" and Keybind.Key ~= Enum.KeyCode.Unknown then
+                        Keybind.State = false
+                        task.spawn(callback, false)
+                    end
+                end)
+
+                Core:SubscribeToTheme(function(theme)
+                    Label.TextColor3 = theme.TextMuted
+                    BindBtn.BackgroundColor3 = theme.Background
+                    BindBtn.TextColor3 = theme.Text
+                    if not Keybind.Listening then BindStroke.Color = theme.Border end
+                end)
+
+                return Keybind
+            end
+
+            -- ==============================================================================
+            -- 🎨 WIDGET: COLOR PICKER
+            -- ==============================================================================
+            function Section:CreateColorPicker(opts: ColorPickerConfig)
+                local ColorP = { Color = opts.Default or Color3.fromRGB(255, 255, 255), Open = false }
+                local callback = opts.Callback or function() end
+                local h, s, v = ColorP.Color:ToHSV()
+
+                local CPFrame = Instance.new("Frame")
+                CPFrame.Size = UDim2.new(1, 0, 0, 30)
+                CPFrame.BackgroundColor3 = Core.Themes.Background
+                CPFrame.ClipsDescendants = true
+                CPFrame.Parent = SecFrame
+                Instance.new("UICorner", CPFrame).CornerRadius = UDim.new(0, 4)
+                local CPStroke = Instance.new("UIStroke", CPFrame)
+                CPStroke.Color = Core.Themes.Border
+
+                local MainBtn = Instance.new("TextButton")
+                MainBtn.Size = UDim2.new(1, 0, 0, 30)
+                MainBtn.BackgroundTransparency = 1
+                MainBtn.Text = ""
+                MainBtn.Parent = CPFrame
+
+                local Label = Instance.new("TextLabel")
+                Label.Size = UDim2.new(1, -40, 1, 0)
+                Label.Position = UDim2.new(0, 10, 0, 0)
+                Label.BackgroundTransparency = 1
+                Label.Text = opts.Name
+                Label.TextColor3 = Core.Themes.TextMuted
+                Label.Font = Enum.Font.Gotham
+                Label.TextSize = 12
+                Label.TextXAlignment = Enum.TextXAlignment.Left
+                Label.Parent = MainBtn
+
+                local DisplayColor = Instance.new("Frame")
+                DisplayColor.Size = UDim2.new(0, 20, 0, 14)
+                DisplayColor.Position = UDim2.new(1, -30, 0.5, -7)
+                DisplayColor.BackgroundColor3 = ColorP.Color
+                DisplayColor.Parent = MainBtn
+                Instance.new("UICorner", DisplayColor).CornerRadius = UDim.new(0, 4)
+                Instance.new("UIStroke", DisplayColor).Color = Core.Themes.Border
+
+                local MapContainer = Instance.new("Frame")
+                MapContainer.Size = UDim2.new(1, 0, 0, 130)
+                MapContainer.Position = UDim2.new(0, 0, 0, 30)
+                MapContainer.BackgroundTransparency = 1
+                MapContainer.Parent = CPFrame
+
+                local SatValMap = Instance.new("ImageLabel")
+                SatValMap.Size = UDim2.new(1, -45, 0, 110)
+                SatValMap.Position = UDim2.new(0, 10, 0, 10)
+                SatValMap.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+                SatValMap.Image = "rbxassetid://4155801252"
+                SatValMap.Parent = MapContainer
+                Instance.new("UICorner", SatValMap).CornerRadius = UDim.new(0, 4)
+
+                local MapCursor = Instance.new("Frame")
+                MapCursor.Size = UDim2.new(0, 8, 0, 8)
+                MapCursor.AnchorPoint = Vector2.new(0.5, 0.5)
+                MapCursor.Position = UDim2.new(s, 0, 1 - v, 0)
+                MapCursor.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                MapCursor.Parent = SatValMap
+                Instance.new("UICorner", MapCursor).CornerRadius = UDim.new(1, 0)
+                Instance.new("UIStroke", MapCursor).Color = Color3.fromRGB(0, 0, 0)
+
+                local HueBar = Instance.new("Frame")
+                HueBar.Size = UDim2.new(0, 15, 0, 110)
+                HueBar.Position = UDim2.new(1, -25, 0, 10)
+                HueBar.Parent = MapContainer
+                Instance.new("UICorner", HueBar).CornerRadius = UDim.new(0, 4)
+                
+                local UIGradient = Instance.new("UIGradient")
+                UIGradient.Rotation = 90
+                UIGradient.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(255,0,0)), ColorSequenceKeypoint.new(0.167, Color3.fromRGB(255,255,0)),
+                    ColorSequenceKeypoint.new(0.333, Color3.fromRGB(0,255,0)), ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0,255,255)),
+                    ColorSequenceKeypoint.new(0.667, Color3.fromRGB(0,0,255)), ColorSequenceKeypoint.new(0.833, Color3.fromRGB(255,0,255)),
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(255,0,0))
+                })
+                UIGradient.Parent = HueBar
+
+                local HueCursor = Instance.new("Frame")
+                HueCursor.Size = UDim2.new(1, 4, 0, 4)
+                HueCursor.Position = UDim2.new(0, -2, 1 - h, -2)
+                HueCursor.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                HueCursor.Parent = HueBar
+                Instance.new("UICorner", HueCursor).CornerRadius = UDim.new(0, 2)
+                Instance.new("UIStroke", HueCursor).Color = Color3.fromRGB(0, 0, 0)
+
+                local function UpdateColor()
+                    ColorP.Color = Color3.fromHSV(h, s, v)
+                    DisplayColor.BackgroundColor3 = ColorP.Color
+                    SatValMap.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+                    task.spawn(callback, ColorP.Color)
+                end
+
+                local trackingMap, trackingHue = false, false
+
+                SatValMap.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then trackingMap = true end end)
+                HueBar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then trackingHue = true end end)
+                UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then trackingMap, trackingHue = false, false end end)
+
+                UserInputService.InputChanged:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseMovement then
+                        if trackingMap then
+                            local x = math.clamp((input.Position.X - SatValMap.AbsolutePosition.X) / SatValMap.AbsoluteSize.X, 0, 1)
+                            local y = math.clamp((input.Position.Y - SatValMap.AbsolutePosition.Y) / SatValMap.AbsoluteSize.Y, 0, 1)
+                            s, v = x, 1 - y
+                            MapCursor.Position = UDim2.new(x, 0, y, 0)
+                            UpdateColor()
+                        elseif trackingHue then
+                            local y = math.clamp((input.Position.Y - HueBar.AbsolutePosition.Y) / HueBar.AbsoluteSize.Y, 0, 1)
+                            h = 1 - y
+                            HueCursor.Position = UDim2.new(0, -2, y, -2)
+                            UpdateColor()
+                        end
+                    end
+                end)
+
+                MainBtn.MouseButton1Click:Connect(function()
+                    ColorP.Open = not ColorP.Open
+                    SecFrame.ZIndex = ColorP.Open and 5 or 1
+                    CPFrame.ZIndex = ColorP.Open and 5 or 1
+                    Core:Tween(CPFrame, {Size = ColorP.Open and UDim2.new(1, 0, 0, 150) or UDim2.new(1, 0, 0, 30)}, 0.25)
+                end)
+
+                Core:SubscribeToTheme(function(theme)
+                    CPFrame.BackgroundColor3 = theme.Background
+                    CPStroke.Color = theme.Border
+                    Label.TextColor3 = theme.TextMuted
+                end)
+
+                return ColorP
+            end
+
+            return Section
+        end
+
+        return Tab
+    end
+
+    Core.Logger:Log("Unified Widgets Engine Injected.")
 end
 
-table.freeze(Core.Easing)
-table.freeze(Core.Math)
-
-return Core
+return Widgets
