@@ -1,1 +1,871 @@
+-- ==============================================================================
+-- 🗂️ EVOK UI LIBRARY - PART 2: WIDGETS ENGINE (Widgets.lua)
+-- Version: 1.2.0 | Developer: Senior UI/UX Engineer (Evok)
+-- Build: Enterprise Ultimate Integration (800+ Lines)
+-- ==============================================================================
 
+local UserInputService = game:GetService("UserInputService")
+local TextService = game:GetService("TextService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+local Widgets = {}
+
+-- ==============================================================================
+-- 💉 INJECTION SYSTEM (Conecta com o Core.lua)
+-- ==============================================================================
+function Widgets.Inject(CoreInstance)
+    local Core = CoreInstance.Core 
+
+    -- ==============================================================================
+    -- 🌊 RIPPLE ENGINE (Efeito de Ondulação Material Design)
+    -- ==============================================================================
+    local function CreateRipple(Parent: GuiObject, MousePosition: Vector2, ThemeColor: Color3)
+        local Ripple = Instance.new("Frame")
+        Ripple.Name = "Ripple"
+        Ripple.BackgroundColor3 = ThemeColor
+        Ripple.BackgroundTransparency = 0.6
+        Ripple.BorderSizePixel = 0
+        Ripple.ZIndex = Parent.ZIndex + 1
+        
+        local Corner = Instance.new("UICorner")
+        Corner.CornerRadius = UDim.new(1, 0)
+        Corner.Parent = Ripple
+        
+        -- Calcula o tamanho necessário para cobrir o botão inteiro
+        local absoluteSize = Parent.AbsoluteSize
+        local size = math.max(absoluteSize.X, absoluteSize.Y) * 1.5
+        
+        -- Posição relativa ao clique
+        local relativeX = MousePosition.X - Parent.AbsolutePosition.X
+        local relativeY = MousePosition.Y - Parent.AbsolutePosition.Y
+        
+        Ripple.Size = UDim2.new(0, 0, 0, 0)
+        Ripple.Position = UDim2.new(0, relativeX, 0, relativeY)
+        Ripple.AnchorPoint = Vector2.new(0.5, 0.5)
+        Ripple.Parent = Parent
+        
+        local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        local tween = TweenService:Create(Ripple, tweenInfo, {
+            Size = UDim2.new(0, size, 0, size),
+            BackgroundTransparency = 1
+        })
+        
+        tween:Play()
+        tween.Completed:Connect(function()
+            Ripple:Destroy()
+        end)
+    end
+
+    -- ==============================================================================
+    -- 📑 TAB SYSTEM (Gerenciamento de Páginas e Colunas)
+    -- ==============================================================================
+    function CoreInstance:CreateTab(name: string)
+        local Window = self
+        local Tab = { Sections = {} }
+        
+        local TabBtn = Instance.new("TextButton")
+        TabBtn.Name = name .. "Tab"
+        TabBtn.AutomaticSize = Enum.AutomaticSize.X
+        TabBtn.Size = UDim2.new(0, 0, 1, 0)
+        TabBtn.BackgroundTransparency = 1
+        TabBtn.Text = name
+        TabBtn.Font = Enum.Font.GothamSemibold
+        TabBtn.TextSize = 14
+        TabBtn.TextColor3 = Core.Themes.TextMuted
+        TabBtn.Parent = Window.TabContainer
+
+        local Page = Instance.new("ScrollingFrame")
+        Page.Name = name .. "Page"
+        Page.Size = UDim2.new(1, 0, 1, 0)
+        Page.BackgroundTransparency = 1
+        Page.ScrollBarThickness = 2
+        Page.ScrollBarImageColor3 = Core.Themes.Border
+        Page.Visible = false
+        Page.Parent = Window.PageContainer
+
+        local PagePadding = Instance.new("UIPadding")
+        PagePadding.PaddingTop = UDim.new(0, 2)
+        PagePadding.PaddingBottom = UDim.new(0, 2)
+        PagePadding.PaddingLeft = UDim.new(0, 2)
+        PagePadding.PaddingRight = UDim.new(0, 10)
+        PagePadding.Parent = Page
+
+        local LeftCol = Instance.new("Frame")
+        LeftCol.Name = "LeftColumn"
+        LeftCol.Size = UDim2.new(0.5, -5, 1, 0)
+        LeftCol.BackgroundTransparency = 1
+        LeftCol.Parent = Page
+        
+        local LeftLayout = Instance.new("UIListLayout")
+        LeftLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        LeftLayout.Padding = UDim.new(0, 12)
+        LeftLayout.Parent = LeftCol
+
+        local RightCol = Instance.new("Frame")
+        RightCol.Name = "RightColumn"
+        RightCol.Size = UDim2.new(0.5, -5, 1, 0)
+        RightCol.Position = UDim2.new(0.5, 5, 0, 0)
+        RightCol.BackgroundTransparency = 1
+        RightCol.Parent = Page
+        
+        local RightLayout = Instance.new("UIListLayout")
+        RightLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        RightLayout.Padding = UDim.new(0, 12)
+        RightLayout.Parent = RightCol
+
+        local function UpdateCanvas()
+            local leftSize = LeftLayout.AbsoluteContentSize.Y
+            local rightSize = RightLayout.AbsoluteContentSize.Y
+            Page.CanvasSize = UDim2.new(0, 0, 0, math.max(leftSize, rightSize) + 20)
+        end
+        LeftLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateCanvas)
+        RightLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateCanvas)
+
+        TabBtn.MouseButton1Click:Connect(function()
+            for _, t in pairs(Window.Tabs) do
+                t.Page.Visible = false
+                Core:Tween(t.Btn, {TextColor3 = Core.Themes.TextMuted}, 0.2)
+            end
+            Page.Visible = true
+            Core:Tween(TabBtn, {TextColor3 = Core.Themes.Accent}, 0.2)
+            Window.CurrentTab = Tab
+        end)
+
+        if #Window.Tabs == 0 then
+            Page.Visible = true
+            TabBtn.TextColor3 = Core.Themes.Accent
+            Window.CurrentTab = Tab
+        end
+
+        Core:SubscribeToTheme(function(theme)
+            Page.ScrollBarImageColor3 = theme.Border
+            if Window.CurrentTab == Tab then
+                TabBtn.TextColor3 = theme.Accent
+            else
+                TabBtn.TextColor3 = theme.TextMuted
+            end
+        end)
+
+        table.insert(Window.Tabs, {Btn = TabBtn, Page = Page})
+
+        -- ==============================================================================
+        -- 🧩 SECTION SYSTEM (Containers para os Widgets)
+        -- ==============================================================================
+        function Tab:CreateSection(secName: string, side: string)
+            local Section = {}
+            local parentCol = side:lower() == "left" and LeftCol or RightCol
+
+            local SecFrame = Instance.new("Frame")
+            SecFrame.Name = secName .. "Section"
+            SecFrame.Size = UDim2.new(1, 0, 0, 0)
+            SecFrame.AutomaticSize = Enum.AutomaticSize.Y
+            SecFrame.BackgroundColor3 = Core.Themes.Container
+            SecFrame.Parent = parentCol
+            
+            local SecCorner = Instance.new("UICorner")
+            SecCorner.CornerRadius = UDim.new(0, 6)
+            SecCorner.Parent = SecFrame
+            
+            local SecStroke = Instance.new("UIStroke")
+            SecStroke.Color = Core.Themes.Border
+            SecStroke.Parent = SecFrame
+
+            local SecPadding = Instance.new("UIPadding")
+            SecPadding.PaddingTop = UDim.new(0, 10)
+            SecPadding.PaddingBottom = UDim.new(0, 10)
+            SecPadding.PaddingLeft = UDim.new(0, 10)
+            SecPadding.PaddingRight = UDim.new(0, 10)
+            SecPadding.Parent = SecFrame
+
+            local SecLayout = Instance.new("UIListLayout")
+            SecLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            SecLayout.Padding = UDim.new(0, 8)
+            SecLayout.Parent = SecFrame
+
+            local SecTitle = Instance.new("TextLabel")
+            SecTitle.Size = UDim2.new(1, 0, 0, 20)
+            SecTitle.BackgroundTransparency = 1
+            SecTitle.Text = secName
+            SecTitle.TextColor3 = Core.Themes.Text
+            SecTitle.Font = Enum.Font.GothamBold
+            SecTitle.TextSize = 13
+            SecTitle.TextXAlignment = Enum.TextXAlignment.Left
+            SecTitle.Parent = SecFrame
+
+            Core:SubscribeToTheme(function(theme)
+                SecFrame.BackgroundColor3 = theme.Container
+                SecStroke.Color = theme.Border
+                SecTitle.TextColor3 = theme.Text
+            end)
+
+            -- ==============================================================================
+            -- 📝 WIDGET: LABEL (Texto Descritivo)
+            -- ==============================================================================
+            function Section:CreateLabel(opts)
+                local LabelWidget = { Text = opts.Name or "Label" }
+                
+                local LabelFrame = Instance.new("Frame")
+                LabelFrame.Size = UDim2.new(1, 0, 0, 20)
+                LabelFrame.BackgroundTransparency = 1
+                LabelFrame.Parent = SecFrame
+                
+                local TextObj = Instance.new("TextLabel")
+                TextObj.Size = UDim2.new(1, 0, 1, 0)
+                TextObj.BackgroundTransparency = 1
+                TextObj.Text = LabelWidget.Text
+                TextObj.TextColor3 = Core.Themes.TextMuted
+                TextObj.Font = Enum.Font.Gotham
+                TextObj.TextSize = 12
+                TextObj.TextWrapped = true
+                TextObj.TextXAlignment = Enum.TextXAlignment.Left
+                TextObj.Parent = LabelFrame
+                
+                -- Ajuste dinâmico de altura baseado no texto
+                TextObj:GetPropertyChangedSignal("TextBounds"):Connect(function()
+                    LabelFrame.Size = UDim2.new(1, 0, 0, TextObj.TextBounds.Y)
+                end)
+
+                function LabelWidget:Set(newText)
+                    LabelWidget.Text = newText
+                    TextObj.Text = newText
+                end
+
+                Core:SubscribeToTheme(function(theme)
+                    TextObj.TextColor3 = theme.TextMuted
+                end)
+
+                return LabelWidget
+            end
+
+            -- ==============================================================================
+            -- 🟩 WIDGET: BUTTON (Com Efeito Ripple e Cooldown)
+            -- ==============================================================================
+            function Section:CreateButton(opts)
+                local Button = { Locked = false }
+                local callback = opts.Callback or function() end
+                
+                local BtnFrame = Instance.new("Frame")
+                BtnFrame.Size = UDim2.new(1, 0, 0, 32)
+                BtnFrame.BackgroundColor3 = Core.Themes.Background
+                BtnFrame.Parent = SecFrame
+                Instance.new("UICorner", BtnFrame).CornerRadius = UDim.new(0, 6)
+                local BtnStroke = Instance.new("UIStroke", BtnFrame)
+                BtnStroke.Color = Core.Themes.Border
+                
+                local ClickBtn = Instance.new("TextButton")
+                ClickBtn.Size = UDim2.new(1, 0, 1, 0)
+                ClickBtn.BackgroundTransparency = 1
+                ClickBtn.Text = opts.Name or "Button"
+                ClickBtn.TextColor3 = Core.Themes.Text
+                ClickBtn.Font = Enum.Font.GothamSemibold
+                ClickBtn.TextSize = 13
+                ClickBtn.ClipsDescendants = true
+                ClickBtn.Parent = BtnFrame
+                Instance.new("UICorner", ClickBtn).CornerRadius = UDim.new(0, 6)
+
+                ClickBtn.MouseButton1Click:Connect(function()
+                    if Button.Locked then return end
+                    
+                    CreateRipple(ClickBtn, UserInputService:GetMouseLocation(), Core.Themes.Accent)
+                    callback()
+                    
+                    if opts.Cooldown then
+                        Button.Locked = true
+                        local originalText = ClickBtn.Text
+                        ClickBtn.Text = "..."
+                        Core:Tween(BtnStroke, {Color = Core.Themes.TextMuted}, 0.2)
+                        
+                        task.wait(opts.Cooldown)
+                        
+                        Button.Locked = false
+                        ClickBtn.Text = originalText
+                        Core:Tween(BtnStroke, {Color = Core.Themes.Border}, 0.2)
+                    end
+                end)
+
+                Core:SubscribeToTheme(function(theme)
+                    BtnFrame.BackgroundColor3 = theme.Background
+                    ClickBtn.TextColor3 = theme.Text
+                    if not Button.Locked then BtnStroke.Color = theme.Border end
+                end)
+
+                return Button
+            end
+
+            -- ==============================================================================
+            -- 🔘 WIDGET: TOGGLE
+            -- ==============================================================================
+            function Section:CreateToggle(opts)
+                local Toggle = { State = opts.Default or false }
+                local callback = opts.Callback or function() end
+
+                local ToggleBtn = Instance.new("TextButton")
+                ToggleBtn.Size = UDim2.new(1, 0, 0, 25)
+                ToggleBtn.BackgroundTransparency = 1
+                ToggleBtn.Text = ""
+                ToggleBtn.Parent = SecFrame
+
+                local Label = Instance.new("TextLabel")
+                Label.Size = UDim2.new(1, -40, 1, 0)
+                Label.BackgroundTransparency = 1
+                Label.Text = opts.Name
+                Label.TextColor3 = Toggle.State and Core.Themes.Text or Core.Themes.TextMuted
+                Label.Font = Enum.Font.Gotham
+                Label.TextSize = 13
+                Label.TextXAlignment = Enum.TextXAlignment.Left
+                Label.Parent = ToggleBtn
+
+                local Outer = Instance.new("Frame")
+                Outer.Size = UDim2.new(0, 36, 0, 18)
+                Outer.AnchorPoint = Vector2.new(1, 0.5)
+                Outer.Position = UDim2.new(1, 0, 0.5, 0)
+                Outer.BackgroundColor3 = Toggle.State and Core.Themes.Accent or Core.Themes.Border
+                Outer.Parent = ToggleBtn
+                Instance.new("UICorner", Outer).CornerRadius = UDim.new(1, 0)
+
+                local Inner = Instance.new("Frame")
+                Inner.Size = UDim2.new(0, 14, 0, 14)
+                Inner.Position = Toggle.State and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+                Inner.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                Inner.Parent = Outer
+                Instance.new("UICorner", Inner).CornerRadius = UDim.new(1, 0)
+
+                function Toggle:Set(newState, skipCallback)
+                    Toggle.State = newState
+                    if not skipCallback then callback(Toggle.State) end
+                    
+                    Core:Tween(Outer, {BackgroundColor3 = Toggle.State and Core.Themes.Accent or Core.Themes.Border}, 0.2)
+                    Core:Tween(Inner, {Position = Toggle.State and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)}, 0.25, Enum.EasingStyle.Back)
+                    Core:Tween(Label, {TextColor3 = Toggle.State and Core.Themes.Text or Core.Themes.TextMuted}, 0.2)
+                end
+
+                ToggleBtn.MouseButton1Click:Connect(function() 
+                    CreateRipple(ToggleBtn, UserInputService:GetMouseLocation(), Core.Themes.TextMuted)
+                    Toggle:Set(not Toggle.State) 
+                end)
+
+                Core:SubscribeToTheme(function(theme)
+                    if Toggle.State then
+                        Outer.BackgroundColor3 = theme.Accent
+                        Label.TextColor3 = theme.Text
+                    else
+                        Outer.BackgroundColor3 = theme.Border
+                        Label.TextColor3 = theme.TextMuted
+                    end
+                end)
+
+                return Toggle
+            end
+
+            -- ==============================================================================
+            -- 🎚️ WIDGET: SLIDER (Com Tooltip de Valor Flutuante)
+            -- ==============================================================================
+            function Section:CreateSlider(opts)
+                local min, max = opts.Min or 0, opts.Max or 100
+                local Slider = { Value = math.clamp(opts.Default or min, min, max) }
+                local callback = opts.Callback or function() end
+
+                local SliderFrame = Instance.new("Frame")
+                SliderFrame.Size = UDim2.new(1, 0, 0, 45)
+                SliderFrame.BackgroundTransparency = 1
+                SliderFrame.Parent = SecFrame
+
+                local Label = Instance.new("TextLabel")
+                Label.Size = UDim2.new(1, -50, 0, 20)
+                Label.BackgroundTransparency = 1
+                Label.Text = opts.Name
+                Label.TextColor3 = Core.Themes.TextMuted
+                Label.Font = Enum.Font.Gotham
+                Label.TextSize = 13
+                Label.TextXAlignment = Enum.TextXAlignment.Left
+                Label.Parent = SliderFrame
+
+                local ValInput = Instance.new("TextBox")
+                ValInput.Size = UDim2.new(0, 45, 0, 20)
+                ValInput.Position = UDim2.new(1, -45, 0, 0)
+                ValInput.BackgroundColor3 = Core.Themes.Background
+                ValInput.TextColor3 = Core.Themes.Text
+                ValInput.Font = Enum.Font.Gotham
+                ValInput.TextSize = 12
+                ValInput.Text = tostring(Slider.Value)
+                ValInput.Parent = SliderFrame
+                Instance.new("UICorner", ValInput).CornerRadius = UDim.new(0, 4)
+                local InputStroke = Instance.new("UIStroke", ValInput)
+                InputStroke.Color = Core.Themes.Border
+
+                local BarBg = Instance.new("TextButton")
+                BarBg.Size = UDim2.new(1, 0, 0, 6)
+                BarBg.Position = UDim2.new(0, 0, 1, -8)
+                BarBg.BackgroundColor3 = Core.Themes.Border
+                BarBg.Text = ""
+                BarBg.Parent = SliderFrame
+                Instance.new("UICorner", BarBg).CornerRadius = UDim.new(1, 0)
+
+                local Fill = Instance.new("Frame")
+                Fill.Size = UDim2.new((Slider.Value - min) / (max - min), 0, 1, 0)
+                Fill.BackgroundColor3 = Core.Themes.Accent
+                Fill.Parent = BarBg
+                Instance.new("UICorner", Fill).CornerRadius = UDim.new(1, 0)
+
+                function Slider:Set(newVal, skipCallback)
+                    Slider.Value = math.clamp(tonumber(newVal) or min, min, max)
+                    local percent = (Slider.Value - min) / (max - min)
+                    
+                    Core:Tween(Fill, {Size = UDim2.new(percent, 0, 1, 0)}, 0.1)
+                    ValInput.Text = tostring(Slider.Value)
+                    
+                    if not skipCallback then callback(Slider.Value) end
+                end
+
+                local sliding = false
+                local function UpdateSlider(input)
+                    local percent = math.clamp((input.Position.X - BarBg.AbsolutePosition.X) / BarBg.AbsoluteSize.X, 0, 1)
+                    Slider:Set(math.floor(min + (max - min) * percent))
+                end
+
+                BarBg.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        sliding = true; UpdateSlider(input)
+                        Core:Tween(Fill, {BackgroundColor3 = Core.Math.Color.Lighten(Core.Themes.Accent, 0.2)}, 0.2)
+                    end
+                end)
+                
+                UserInputService.InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 and sliding then
+                        sliding = false
+                        Core:Tween(Fill, {BackgroundColor3 = Core.Themes.Accent}, 0.2)
+                    end
+                end)
+                
+                UserInputService.InputChanged:Connect(function(input)
+                    if sliding and input.UserInputType == Enum.UserInputType.MouseMovement then 
+                        UpdateSlider(input) 
+                    end
+                end)
+                
+                ValInput.FocusLost:Connect(function() Slider:Set(ValInput.Text) end)
+
+                Core:SubscribeToTheme(function(theme)
+                    Label.TextColor3 = theme.TextMuted
+                    ValInput.BackgroundColor3 = theme.Background
+                    ValInput.TextColor3 = theme.Text
+                    InputStroke.Color = theme.Border
+                    BarBg.BackgroundColor3 = theme.Border
+                    if not sliding then Fill.BackgroundColor3 = theme.Accent end
+                end)
+
+                return Slider
+            end
+
+            -- ==============================================================================
+            -- 📜 WIDGET: MULTI-DROPDOWN (Suporte a Seleção Múltipla Dinâmica)
+            -- ==============================================================================
+            function Section:CreateMultiDropdown(opts)
+                local Dropdown = { 
+                    Options = opts.Options or {}, 
+                    Selected = opts.Default or {}, -- Table of selections
+                    Open = false 
+                }
+                local callback = opts.Callback or function() end
+
+                local DropFrame = Instance.new("Frame")
+                DropFrame.Size = UDim2.new(1, 0, 0, 35)
+                DropFrame.BackgroundColor3 = Core.Themes.Background
+                DropFrame.ClipsDescendants = true
+                DropFrame.Parent = SecFrame
+                Instance.new("UICorner", DropFrame).CornerRadius = UDim.new(0, 6)
+                local DropStroke = Instance.new("UIStroke", DropFrame)
+                DropStroke.Color = Core.Themes.Border
+
+                local MainBtn = Instance.new("TextButton")
+                MainBtn.Size = UDim2.new(1, 0, 0, 35)
+                MainBtn.BackgroundTransparency = 1
+                MainBtn.Text = ""
+                MainBtn.Parent = DropFrame
+
+                local Label = Instance.new("TextLabel")
+                Label.Size = UDim2.new(1, -30, 1, 0)
+                Label.Position = UDim2.new(0, 10, 0, 0)
+                Label.BackgroundTransparency = 1
+                
+                local function UpdateLabel()
+                    if #Dropdown.Selected == 0 then
+                        Label.Text = opts.Name .. ": None"
+                    elseif #Dropdown.Selected == 1 then
+                        Label.Text = opts.Name .. ": " .. tostring(Dropdown.Selected[1])
+                    else
+                        Label.Text = opts.Name .. ": " .. tostring(#Dropdown.Selected) .. " Selected"
+                    end
+                end
+                UpdateLabel()
+                
+                Label.TextColor3 = Core.Themes.TextMuted
+                Label.Font = Enum.Font.Gotham
+                Label.TextSize = 13
+                Label.TextXAlignment = Enum.TextXAlignment.Left
+                Label.Parent = MainBtn
+
+                local Icon = Instance.new("TextLabel")
+                Icon.Size = UDim2.new(0, 20, 0, 20)
+                Icon.Position = UDim2.new(1, -25, 0.5, -10)
+                Icon.BackgroundTransparency = 1
+                Icon.Text = "+"
+                Icon.TextColor3 = Core.Themes.TextMuted
+                Icon.Font = Enum.Font.GothamBold
+                Icon.TextSize = 16
+                Icon.Parent = MainBtn
+
+                local ScrollContainer = Instance.new("ScrollingFrame")
+                ScrollContainer.Size = UDim2.new(1, 0, 1, -35)
+                ScrollContainer.Position = UDim2.new(0, 0, 0, 35)
+                ScrollContainer.BackgroundTransparency = 1
+                ScrollContainer.ScrollBarThickness = 2
+                ScrollContainer.ScrollBarImageColor3 = Core.Themes.Border
+                ScrollContainer.Parent = DropFrame
+                
+                local ListLayout = Instance.new("UIListLayout")
+                ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                ListLayout.Parent = ScrollContainer
+
+                local function ToggleDrop()
+                    Dropdown.Open = not Dropdown.Open
+                    Icon.Text = Dropdown.Open and "-" or "+"
+                    
+                    SecFrame.ZIndex = Dropdown.Open and 5 or 1
+                    DropFrame.ZIndex = Dropdown.Open and 5 or 1
+                    
+                    local maxItems = 4
+                    local itemsCount = math.min(#Dropdown.Options, maxItems)
+                    local targetSize = Dropdown.Open and UDim2.new(1, 0, 0, 35 + (itemsCount * 25)) or UDim2.new(1, 0, 0, 35)
+                    
+                    ScrollContainer.CanvasSize = UDim2.new(0, 0, 0, #Dropdown.Options * 25)
+                    Core:Tween(DropFrame, {Size = targetSize}, 0.25, Enum.EasingStyle.Quint)
+                    Core:Tween(Icon, {Rotation = Dropdown.Open and 180 or 0}, 0.25)
+                end
+
+                MainBtn.MouseButton1Click:Connect(ToggleDrop)
+
+                function Dropdown:Refresh(newOptions)
+                    Dropdown.Options = newOptions
+                    for _, child in pairs(ScrollContainer:GetChildren()) do
+                        if child:IsA("TextButton") then child:Destroy() end
+                    end
+
+                    for _, opt in ipairs(Dropdown.Options) do
+                        local isSelected = table.find(Dropdown.Selected, opt) ~= nil
+
+                        local OptBtn = Instance.new("TextButton")
+                        OptBtn.Size = UDim2.new(1, 0, 0, 25)
+                        OptBtn.BackgroundTransparency = 1
+                        OptBtn.Text = ""
+                        OptBtn.Parent = ScrollContainer
+
+                        local OptLabel = Instance.new("TextLabel")
+                        OptLabel.Size = UDim2.new(1, -30, 1, 0)
+                        OptLabel.Position = UDim2.new(0, 30, 0, 0)
+                        OptLabel.BackgroundTransparency = 1
+                        OptLabel.Text = tostring(opt)
+                        OptLabel.TextColor3 = isSelected and Core.Themes.Accent or Core.Themes.Text
+                        OptLabel.Font = Enum.Font.Gotham
+                        OptLabel.TextSize = 13
+                        OptLabel.TextXAlignment = Enum.TextXAlignment.Left
+                        OptLabel.Parent = OptBtn
+
+                        -- Checkbox visual inside dropdown
+                        local CheckBox = Instance.new("Frame")
+                        CheckBox.Size = UDim2.new(0, 12, 0, 12)
+                        CheckBox.Position = UDim2.new(0, 10, 0.5, -6)
+                        CheckBox.BackgroundColor3 = isSelected and Core.Themes.Accent or Core.Themes.Background
+                        CheckBox.Parent = OptBtn
+                        Instance.new("UICorner", CheckBox).CornerRadius = UDim.new(0, 3)
+                        local CheckStroke = Instance.new("UIStroke", CheckBox)
+                        CheckStroke.Color = isSelected and Core.Themes.Accent or Core.Themes.Border
+
+                        OptBtn.MouseButton1Click:Connect(function()
+                            if isSelected then
+                                local idx = table.find(Dropdown.Selected, opt)
+                                if idx then table.remove(Dropdown.Selected, idx) end
+                            else
+                                table.insert(Dropdown.Selected, opt)
+                            end
+                            UpdateLabel()
+                            callback(Dropdown.Selected)
+                            Dropdown:Refresh(Dropdown.Options) 
+                        end)
+                    end
+                end
+
+                Core:SubscribeToTheme(function(theme)
+                    DropFrame.BackgroundColor3 = theme.Background
+                    DropStroke.Color = theme.Border
+                    Label.TextColor3 = theme.TextMuted
+                    Icon.TextColor3 = theme.TextMuted
+                    ScrollContainer.ScrollBarImageColor3 = theme.Border
+                    Dropdown:Refresh(Dropdown.Options) 
+                end)
+
+                Dropdown:Refresh(Dropdown.Options)
+                return Dropdown
+            end
+
+            -- ==============================================================================
+            -- 🎨 WIDGET: COLOR PICKER 
+            -- ==============================================================================
+            function Section:CreateColorPicker(opts)
+                local ColorP = { Color = opts.Default or Color3.fromRGB(255, 255, 255), Open = false }
+                local callback = opts.Callback or function() end
+                local h, s, v = ColorP.Color:ToHSV()
+
+                local CPFrame = Instance.new("Frame")
+                CPFrame.Size = UDim2.new(1, 0, 0, 35)
+                CPFrame.BackgroundColor3 = Core.Themes.Background
+                CPFrame.ClipsDescendants = true
+                CPFrame.Parent = SecFrame
+                Instance.new("UICorner", CPFrame).CornerRadius = UDim.new(0, 6)
+                local CPStroke = Instance.new("UIStroke", CPFrame)
+                CPStroke.Color = Core.Themes.Border
+
+                local MainBtn = Instance.new("TextButton")
+                MainBtn.Size = UDim2.new(1, 0, 0, 35)
+                MainBtn.BackgroundTransparency = 1
+                MainBtn.Text = ""
+                MainBtn.Parent = CPFrame
+
+                local Label = Instance.new("TextLabel")
+                Label.Size = UDim2.new(1, -40, 1, 0)
+                Label.Position = UDim2.new(0, 10, 0, 0)
+                Label.BackgroundTransparency = 1
+                Label.Text = opts.Name
+                Label.TextColor3 = Core.Themes.TextMuted
+                Label.Font = Enum.Font.Gotham
+                Label.TextSize = 13
+                Label.TextXAlignment = Enum.TextXAlignment.Left
+                Label.Parent = MainBtn
+
+                local DisplayColor = Instance.new("Frame")
+                DisplayColor.Size = UDim2.new(0, 24, 0, 14)
+                DisplayColor.Position = UDim2.new(1, -34, 0.5, -7)
+                DisplayColor.BackgroundColor3 = ColorP.Color
+                DisplayColor.Parent = MainBtn
+                Instance.new("UICorner", DisplayColor).CornerRadius = UDim.new(0, 4)
+                Instance.new("UIStroke", DisplayColor).Color = Core.Themes.Border
+
+                local MapContainer = Instance.new("Frame")
+                MapContainer.Size = UDim2.new(1, 0, 0, 160)
+                MapContainer.Position = UDim2.new(0, 0, 0, 35)
+                MapContainer.BackgroundTransparency = 1
+                MapContainer.Parent = CPFrame
+
+                local SatValMap = Instance.new("ImageLabel")
+                SatValMap.Size = UDim2.new(1, -45, 0, 110)
+                SatValMap.Position = UDim2.new(0, 10, 0, 10)
+                SatValMap.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+                SatValMap.Image = "rbxassetid://4155801252"
+                SatValMap.Parent = MapContainer
+                Instance.new("UICorner", SatValMap).CornerRadius = UDim.new(0, 4)
+
+                local MapCursor = Instance.new("Frame")
+                MapCursor.Size = UDim2.new(0, 10, 0, 10)
+                MapCursor.AnchorPoint = Vector2.new(0.5, 0.5)
+                MapCursor.Position = UDim2.new(s, 0, 1 - v, 0)
+                MapCursor.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                MapCursor.Parent = SatValMap
+                Instance.new("UICorner", MapCursor).CornerRadius = UDim.new(1, 0)
+                Instance.new("UIStroke", MapCursor).Color = Color3.fromRGB(0, 0, 0)
+
+                local HueBar = Instance.new("Frame")
+                HueBar.Size = UDim2.new(0, 15, 0, 110)
+                HueBar.Position = UDim2.new(1, -25, 0, 10)
+                HueBar.Parent = MapContainer
+                Instance.new("UICorner", HueBar).CornerRadius = UDim.new(0, 4)
+                
+                local UIGradient = Instance.new("UIGradient")
+                UIGradient.Rotation = 90
+                UIGradient.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+                    ColorSequenceKeypoint.new(0.167, Color3.fromRGB(255, 255, 0)),
+                    ColorSequenceKeypoint.new(0.333, Color3.fromRGB(0, 255, 0)),
+                    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
+                    ColorSequenceKeypoint.new(0.667, Color3.fromRGB(0, 0, 255)),
+                    ColorSequenceKeypoint.new(0.833, Color3.fromRGB(255, 0, 255)),
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
+                })
+                UIGradient.Parent = HueBar
+
+                local HueCursor = Instance.new("Frame")
+                HueCursor.Size = UDim2.new(1, 4, 0, 4)
+                HueCursor.Position = UDim2.new(0, -2, 1 - h, -2)
+                HueCursor.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                HueCursor.Parent = HueBar
+                Instance.new("UICorner", HueCursor).CornerRadius = UDim.new(0, 2)
+                Instance.new("UIStroke", HueCursor).Color = Color3.fromRGB(0, 0, 0)
+
+                local HexInput = Instance.new("TextBox")
+                HexInput.Size = UDim2.new(1, -20, 0, 25)
+                HexInput.Position = UDim2.new(0, 10, 0, 125)
+                HexInput.BackgroundColor3 = Core.Themes.Container
+                HexInput.TextColor3 = Core.Themes.Text
+                HexInput.Font = Enum.Font.Gotham
+                HexInput.TextSize = 12
+                HexInput.Text = Core.Math.Color.ToHex(ColorP.Color)
+                HexInput.Parent = MapContainer
+                Instance.new("UICorner", HexInput).CornerRadius = UDim.new(0, 4)
+                local HexStroke = Instance.new("UIStroke", HexInput)
+                HexStroke.Color = Core.Themes.Border
+
+                local function UpdateColor()
+                    ColorP.Color = Color3.fromHSV(h, s, v)
+                    DisplayColor.BackgroundColor3 = ColorP.Color
+                    SatValMap.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+                    HexInput.Text = Core.Math.Color.ToHex(ColorP.Color)
+                    callback(ColorP.Color)
+                end
+
+                local trackingMap, trackingHue = false, false
+
+                SatValMap.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 then trackingMap = true end
+                end)
+                HueBar.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 then trackingHue = true end
+                end)
+                UserInputService.InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        trackingMap, trackingHue = false, false
+                    end
+                end)
+
+                UserInputService.InputChanged:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseMovement then
+                        if trackingMap then
+                            local x = math.clamp((input.Position.X - SatValMap.AbsolutePosition.X) / SatValMap.AbsoluteSize.X, 0, 1)
+                            local y = math.clamp((input.Position.Y - SatValMap.AbsolutePosition.Y) / SatValMap.AbsoluteSize.Y, 0, 1)
+                            s, v = x, 1 - y
+                            MapCursor.Position = UDim2.new(x, 0, y, 0)
+                            UpdateColor()
+                        elseif trackingHue then
+                            local y = math.clamp((input.Position.Y - HueBar.AbsolutePosition.Y) / HueBar.AbsoluteSize.Y, 0, 1)
+                            h = 1 - y
+                            HueCursor.Position = UDim2.new(0, -2, y, -2)
+                            UpdateColor()
+                        end
+                    end
+                end)
+
+                HexInput.FocusLost:Connect(function()
+                    local success, newColor = pcall(function() return Core.Math.Color.FromHex(HexInput.Text) end)
+                    if success then
+                        h, s, v = newColor:ToHSV()
+                        MapCursor.Position = UDim2.new(s, 0, 1 - v, 0)
+                        HueCursor.Position = UDim2.new(0, -2, 1 - h, -2)
+                        UpdateColor()
+                    else
+                        HexInput.Text = Core.Math.Color.ToHex(ColorP.Color) 
+                    end
+                end)
+
+                MainBtn.MouseButton1Click:Connect(function()
+                    ColorP.Open = not ColorP.Open
+                    SecFrame.ZIndex = ColorP.Open and 5 or 1
+                    CPFrame.ZIndex = ColorP.Open and 5 or 1
+                    Core:Tween(CPFrame, {Size = ColorP.Open and UDim2.new(1, 0, 0, 195) or UDim2.new(1, 0, 0, 35)}, 0.25, Enum.EasingStyle.Quint)
+                end)
+
+                Core:SubscribeToTheme(function(theme)
+                    CPFrame.BackgroundColor3 = theme.Background
+                    CPStroke.Color = theme.Border
+                    Label.TextColor3 = theme.TextMuted
+                    HexInput.BackgroundColor3 = theme.Container
+                    HexInput.TextColor3 = theme.Text
+                    HexStroke.Color = theme.Border
+                end)
+
+                return ColorP
+            end
+
+            -- ==============================================================================
+            -- ⌨️ WIDGET: KEYBIND
+            -- ==============================================================================
+            function Section:CreateKeybind(opts)
+                local Keybind = { Key = opts.Default or Enum.KeyCode.Unknown, Listening = false }
+                local callback = opts.Callback or function() end
+
+                local KeyFrame = Instance.new("Frame")
+                KeyFrame.Size = UDim2.new(1, 0, 0, 30)
+                KeyFrame.BackgroundTransparency = 1
+                KeyFrame.Parent = SecFrame
+
+                local Label = Instance.new("TextLabel")
+                Label.Size = UDim2.new(1, -80, 1, 0)
+                Label.BackgroundTransparency = 1
+                Label.Text = opts.Name
+                Label.TextColor3 = Core.Themes.TextMuted
+                Label.Font = Enum.Font.Gotham
+                Label.TextSize = 13
+                Label.TextXAlignment = Enum.TextXAlignment.Left
+                Label.Parent = KeyFrame
+
+                local BindBtn = Instance.new("TextButton")
+                BindBtn.Size = UDim2.new(0, 70, 0, 22)
+                BindBtn.Position = UDim2.new(1, -70, 0.5, -11)
+                BindBtn.BackgroundColor3 = Core.Themes.Background
+                BindBtn.Text = Keybind.Key == Enum.KeyCode.Unknown and "None" or Keybind.Key.Name
+                BindBtn.TextColor3 = Core.Themes.Text
+                BindBtn.Font = Enum.Font.Gotham
+                BindBtn.TextSize = 12
+                BindBtn.Parent = KeyFrame
+                Instance.new("UICorner", BindBtn).CornerRadius = UDim.new(0, 4)
+                local BindStroke = Instance.new("UIStroke", BindBtn)
+                BindStroke.Color = Core.Themes.Border
+
+                BindBtn.MouseButton1Click:Connect(function()
+                    Keybind.Listening = true
+                    BindBtn.Text = "..."
+                    Core:Tween(BindStroke, {Color = Core.Themes.Accent}, 0.2)
+                end)
+
+                UserInputService.InputBegan:Connect(function(input, gpe)
+                    if Keybind.Listening and input.UserInputType == Enum.UserInputType.Keyboard then
+                        local key = input.KeyCode
+                        if key == Enum.KeyCode.Escape or key == Enum.KeyCode.Backspace then
+                            Keybind.Key = Enum.KeyCode.Unknown
+                            BindBtn.Text = "None"
+                        else
+                            Keybind.Key = key
+                            BindBtn.Text = key.Name
+                        end
+                        Keybind.Listening = false
+                        Core:Tween(BindStroke, {Color = Core.Themes.Border}, 0.2)
+                    elseif not gpe and input.KeyCode == Keybind.Key and Keybind.Key ~= Enum.KeyCode.Unknown then
+                        callback(Keybind.Key)
+                    end
+                end)
+
+                Core:SubscribeToTheme(function(theme)
+                    Label.TextColor3 = theme.TextMuted
+                    BindBtn.BackgroundColor3 = theme.Background
+                    BindBtn.TextColor3 = theme.Text
+                    if not Keybind.Listening then
+                        BindStroke.Color = theme.Border
+                    else
+                        BindStroke.Color = theme.Accent
+                    end
+                end)
+
+                return Keybind
+            end
+
+            return Section
+        end
+
+        return Tab
+    end
+end
+
+return Widgets
