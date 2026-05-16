@@ -1,1 +1,726 @@
+-- ==============================================================================
+-- 🎨 EVOK UI LIBRARY - PART 5: VISUALS API & ENGINE (VisualsAPI.lua)
+-- Version: 2.0.0 | Developer: Senior UI/UX Engineer (Evok)
+-- Build: Enterprise Ultimate Visuals (Particles, Lexer, Context Menu, Damage Text)
+-- ==============================================================================
 
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local Visuals = {
+    Connections = {},
+    Particles = {},
+    PostProcessing = {},
+    HitmarkerGUI = nil,
+    DamageNumGUI = nil,
+    ContextMenuGUI = nil
+}
+
+-- ==============================================================================
+-- 🌌 SYSTEM 1: ADVANCED 2D PARTICLE PHYSICS (With Screen Bounce)
+-- ==============================================================================
+Visuals.ParticleEngine = {
+    Enabled = true,
+    Gravity = Vector2.new(0, 300), 
+    Wind = Vector2.new(0, 0),
+    BounceFriction = 0.6,
+    Container = nil
+}
+
+function Visuals.ParticleEngine:Init(TargetGUI)
+    if self.Container then return end
+    self.Container = Instance.new("Frame")
+    self.Container.Name = "EvokParticleContainer"
+    self.Container.Size = UDim2.new(1, 0, 1, 0)
+    self.Container.BackgroundTransparency = 1
+    self.Container.ZIndex = 9000
+    self.Container.Parent = TargetGUI
+
+    local lastUpdate = tick()
+    local conn = RunService.RenderStepped:Connect(function()
+        if not self.Enabled then return end
+        local now = tick()
+        local dt = math.clamp(now - lastUpdate, 0.001, 0.1)
+        lastUpdate = now
+        
+        local screenSize = Camera.ViewportSize
+
+        for i = #Visuals.Particles, 1, -1 do
+            local p = Visuals.Particles[i]
+            p.Life = p.Life - dt
+            
+            if p.Life <= 0 then
+                p.Frame:Destroy()
+                table.remove(Visuals.Particles, i)
+            else
+                -- Verlet/Euler Physics Integration
+                p.Velocity = p.Velocity + (self.Gravity + self.Wind) * dt
+                p.Velocity = p.Velocity * (1 - (p.Drag * dt))
+                p.Position = p.Position + p.Velocity * dt
+                p.Rotation = p.Rotation + p.Spin * dt
+                
+                -- Screen Bounce Collision Logic
+                if p.Bounce then
+                    local sizeHalf = p.CurrentSize / 2
+                    if p.Position.X - sizeHalf < 0 then
+                        p.Position = Vector2.new(sizeHalf, p.Position.Y)
+                        p.Velocity = Vector2.new(math.abs(p.Velocity.X) * self.BounceFriction, p.Velocity.Y)
+                    elseif p.Position.X + sizeHalf > screenSize.X then
+                        p.Position = Vector2.new(screenSize.X - sizeHalf, p.Position.Y)
+                        p.Velocity = Vector2.new(-math.abs(p.Velocity.X) * self.BounceFriction, p.Velocity.Y)
+                    end
+                    
+                    if p.Position.Y + sizeHalf > screenSize.Y then
+                        p.Position = Vector2.new(p.Position.X, screenSize.Y - sizeHalf)
+                        p.Velocity = Vector2.new(p.Velocity.X, -math.abs(p.Velocity.Y) * self.BounceFriction)
+                    elseif p.Position.Y - sizeHalf < 0 then
+                        p.Position = Vector2.new(p.Position.X, sizeHalf)
+                        p.Velocity = Vector2.new(p.Velocity.X, math.abs(p.Velocity.Y) * self.BounceFriction)
+                    end
+                end
+                
+                local lifeRatio = math.clamp(p.Life / p.MaxLife, 0, 1)
+                p.CurrentSize = p.StartSize * lifeRatio
+                
+                -- Dynamic Color Interpolation
+                if p.EndColor then
+                    p.Frame.BackgroundColor3 = p.EndColor:Lerp(p.StartColor, lifeRatio)
+                end
+                
+                p.Frame.Position = UDim2.new(0, p.Position.X, 0, p.Position.Y)
+                p.Frame.Rotation = p.Rotation
+                p.Frame.Size = UDim2.new(0, p.CurrentSize, 0, p.CurrentSize)
+                p.Frame.BackgroundTransparency = 1 - (math.sin(lifeRatio * math.pi)) -- Smooth fade in and out
+            end
+        end
+    end)
+    table.insert(Visuals.Connections, conn)
+end
+
+function Visuals.ParticleEngine:Emit(config)
+    if not self.Container or not self.Enabled then return end
+    
+    local amount = config.Amount or 1
+    local origin = config.Position or Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local startCol = config.Color or Color3.fromRGB(255, 255, 255)
+    local endCol = config.EndColor or startCol
+    
+    for i = 1, amount do
+        local angle = math.rad(math.random(0, 360))
+        local speed = math.random(config.MinSpeed or 100, config.MaxSpeed or 400)
+        local vel = Vector2.new(math.cos(angle) * speed, math.sin(angle) * speed)
+        
+        local frame = Instance.new("Frame")
+        frame.BackgroundColor3 = startCol
+        frame.BorderSizePixel = 0
+        frame.AnchorPoint = Vector2.new(0.5, 0.5)
+        
+        if config.Shape == "Circle" or not config.Shape then
+            Instance.new("UICorner", frame).CornerRadius = UDim.new(1, 0)
+        end
+        
+        frame.Parent = self.Container
+
+        local startSize = math.random(config.MinSize or 3, config.MaxSize or 8)
+        
+        table.insert(Visuals.Particles, {
+            Frame = frame,
+            Position = origin,
+            Velocity = vel,
+            StartSize = startSize,
+            CurrentSize = startSize,
+            StartColor = startCol,
+            EndColor = endCol,
+            Life = config.Lifetime or 2,
+            MaxLife = config.Lifetime or 2,
+            Rotation = math.random(0, 360),
+            Spin = math.random(-360, 360),
+            Drag = config.Drag or 1.5,
+            Bounce = config.Bounce or false
+        })
+    end
+end
+
+-- ==============================================================================
+-- 🩸 SYSTEM 2: DAMAGE NUMBERS (3D to 2D Projection Projection Engine)
+-- ==============================================================================
+Visuals.DamageNumbers = {}
+
+function Visuals.DamageNumbers:Init(TargetGUI)
+    if Visuals.DamageNumGUI then return end
+    Visuals.DamageNumGUI = Instance.new("Frame")
+    Visuals.DamageNumGUI.Name = "EvokDamageNumbers"
+    Visuals.DamageNumGUI.Size = UDim2.new(1, 0, 1, 0)
+    Visuals.DamageNumGUI.BackgroundTransparency = 1
+    Visuals.DamageNumGUI.ZIndex = 8500
+    Visuals.DamageNumGUI.Parent = TargetGUI
+end
+
+function Visuals.DamageNumbers:Show(amount, worldPosition, isCrit)
+    if not Visuals.DamageNumGUI then return end
+    
+    local screenPos, onScreen = Camera:WorldToViewportPoint(worldPosition)
+    if not onScreen then return end
+
+    local Label = Instance.new("TextLabel")
+    Label.BackgroundTransparency = 1
+    Label.Text = tostring(math.floor(amount))
+    Label.TextColor3 = isCrit and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(255, 255, 255)
+    Label.Font = isCrit and Enum.Font.GothamBlack or Enum.Font.GothamBold
+    Label.TextSize = isCrit and 24 or 18
+    Label.TextStrokeTransparency = 0
+    Label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    
+    -- Random spread for numbers
+    local offsetX = math.random(-30, 30)
+    local offsetY = math.random(-10, 10)
+    
+    Label.Position = UDim2.new(0, screenPos.X + offsetX, 0, screenPos.Y + offsetY)
+    Label.Size = UDim2.new(0, 50, 0, 50)
+    Label.AnchorPoint = Vector2.new(0.5, 0.5)
+    Label.Parent = Visuals.DamageNumGUI
+
+    -- Physics arc animation
+    local targetY = screenPos.Y - math.random(50, 100)
+    local targetX = screenPos.X + (offsetX * 1.5)
+    
+    local tweenInfo1 = TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    local tween1 = TweenService:Create(Label, tweenInfo1, {
+        Position = UDim2.new(0, targetX, 0, targetY),
+        TextSize = isCrit and 28 or 22
+    })
+    
+    local tweenInfo2 = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    local tween2 = TweenService:Create(Label, tweenInfo2, {
+        Position = UDim2.new(0, targetX, 0, targetY + 30),
+        TextTransparency = 1,
+        TextStrokeTransparency = 1
+    })
+
+    tween1:Play()
+    tween1.Completed:Connect(function()
+        tween2:Play()
+        tween2.Completed:Connect(function()
+            Label:Destroy()
+        end)
+    end)
+end
+
+-- ==============================================================================
+-- 🎯 SYSTEM 3: HITMARKER OVERLAYS
+-- ==============================================================================
+Visuals.Overlay = {}
+
+function Visuals.Overlay:Init(TargetGUI)
+    if Visuals.HitmarkerGUI then return end
+    Visuals.HitmarkerGUI = Instance.new("Frame")
+    Visuals.HitmarkerGUI.Name = "EvokHitmarkers"
+    Visuals.HitmarkerGUI.Size = UDim2.new(1, 0, 1, 0)
+    Visuals.HitmarkerGUI.BackgroundTransparency = 1
+    Visuals.HitmarkerGUI.ZIndex = 9500
+    Visuals.HitmarkerGUI.Parent = TargetGUI
+end
+
+function Visuals.Overlay:Hitmarker(color, soundId)
+    if not Visuals.HitmarkerGUI then return end
+    
+    local center = Camera.ViewportSize / 2
+    local size = 12
+    local thickness = 2
+    local gap = 6
+    local drawColor = color or Color3.fromRGB(255, 255, 255)
+
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(0, size*3, 0, size*3)
+    container.Position = UDim2.new(0, center.X - (size*1.5), 0, center.Y - (size*1.5))
+    container.BackgroundTransparency = 1
+    container.Parent = Visuals.HitmarkerGUI
+
+    local angles = {45, 135, 225, 315}
+    local lines = {}
+    
+    for _, angle in ipairs(angles) do
+        local line = Instance.new("Frame")
+        line.BackgroundColor3 = drawColor
+        line.BorderSizePixel = 0
+        line.AnchorPoint = Vector2.new(0.5, 0.5)
+        line.Size = UDim2.new(0, thickness, 0, size)
+        
+        local rad = math.rad(angle)
+        local cx, cy = (size*1.5), (size*1.5)
+        local dx, dy = math.cos(rad) * gap, math.sin(rad) * gap
+        
+        line.Position = UDim2.new(0, cx + dx, 0, cy + dy)
+        line.Rotation = angle
+        line.Parent = container
+        table.insert(lines, line)
+    end
+
+    if soundId then
+        task.spawn(function()
+            local snd = Instance.new("Sound")
+            snd.SoundId = "rbxassetid://" .. tostring(soundId)
+            snd.Volume = 1
+            snd.Parent = workspace
+            snd:Play()
+            game:GetService("Debris"):AddItem(snd, 2)
+        end)
+    end
+
+    local tweenInfo = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+    for _, line in ipairs(lines) do
+        local rad = math.rad(line.Rotation)
+        local cx, cy = (size*1.5), (size*1.5)
+        local nx, ny = math.cos(rad) * (gap + 12), math.sin(rad) * (gap + 12)
+        
+        local tw = TweenService:Create(line, tweenInfo, {
+            Position = UDim2.new(0, cx + nx, 0, cy + ny),
+            BackgroundTransparency = 1
+        })
+        tw:Play()
+    end
+
+    task.delay(0.4, function() container:Destroy() end)
+end
+
+-- ==============================================================================
+-- 🖱️ SYSTEM 4: RIGHT-CLICK CONTEXT MENU ENGINE
+-- ==============================================================================
+Visuals.ContextMenu = {}
+
+function Visuals.ContextMenu:Init(TargetGUI, CoreLib)
+    if Visuals.ContextMenuGUI then return end
+    Visuals.ContextMenuGUI = Instance.new("Frame")
+    Visuals.ContextMenuGUI.Name = "EvokContextMenuLayer"
+    Visuals.ContextMenuGUI.Size = UDim2.new(1, 0, 1, 0)
+    Visuals.ContextMenuGUI.BackgroundTransparency = 1
+    Visuals.ContextMenuGUI.ZIndex = 9900
+    Visuals.ContextMenuGUI.Parent = TargetGUI
+    
+    self.Core = CoreLib
+
+    -- Global click detection to close menus
+    UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            self:CloseAll()
+        end
+    end)
+end
+
+function Visuals.ContextMenu:CloseAll()
+    if not Visuals.ContextMenuGUI then return end
+    for _, child in ipairs(Visuals.ContextMenuGUI:GetChildren()) do
+        if child:IsA("Frame") then
+            local tw = TweenService:Create(child, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, child.Size.X.Offset, 0, 0),
+                BackgroundTransparency = 1
+            })
+            tw:Play()
+            tw.Completed:Connect(function() child:Destroy() end)
+        end
+    end
+end
+
+function Visuals.ContextMenu:Create(targetInstance, optionsArray)
+    if not Visuals.ContextMenuGUI then return end
+
+    targetInstance.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            self:CloseAll()
+            
+            local mousePos = UserInputService:GetMouseLocation()
+            local menuWidth = 140
+            local menuHeight = #optionsArray * 25 + 10
+
+            local MenuFrame = Instance.new("Frame")
+            MenuFrame.Size = UDim2.new(0, menuWidth, 0, 0) -- Start collapsed
+            MenuFrame.Position = UDim2.new(0, mousePos.X, 0, mousePos.Y - 36)
+            MenuFrame.BackgroundColor3 = self.Core.Themes.Container
+            MenuFrame.ClipsDescendants = true
+            MenuFrame.Parent = Visuals.ContextMenuGUI
+            
+            Instance.new("UICorner", MenuFrame).CornerRadius = UDim.new(0, 6)
+            local Stroke = Instance.new("UIStroke", MenuFrame)
+            Stroke.Color = self.Core.Themes.Border
+
+            local Layout = Instance.new("UIListLayout", MenuFrame)
+            Layout.SortOrder = Enum.SortOrder.LayoutOrder
+            Layout.Padding = UDim.new(0, 0)
+
+            local Padding = Instance.new("UIPadding", MenuFrame)
+            Padding.PaddingTop = UDim.new(0, 5)
+            Padding.PaddingBottom = UDim.new(0, 5)
+
+            for i, opt in ipairs(optionsArray) do
+                local Btn = Instance.new("TextButton")
+                Btn.Size = UDim2.new(1, 0, 0, 25)
+                Btn.BackgroundTransparency = 1
+                Btn.Text = "  " .. opt.Name
+                Btn.TextColor3 = self.Core.Themes.Text
+                Btn.Font = Enum.Font.Gotham
+                Btn.TextSize = 12
+                Btn.TextXAlignment = Enum.TextXAlignment.Left
+                Btn.Parent = MenuFrame
+
+                Btn.MouseEnter:Connect(function()
+                    TweenService:Create(Btn, TweenInfo.new(0.1), {BackgroundColor3 = self.Core.Themes.Border, BackgroundTransparency = 0.5}):Play()
+                end)
+                Btn.MouseLeave:Connect(function()
+                    TweenService:Create(Btn, TweenInfo.new(0.1), {BackgroundTransparency = 1}):Play()
+                end)
+
+                Btn.MouseButton1Click:Connect(function()
+                    if opt.Callback then pcall(opt.Callback) end
+                    self:CloseAll()
+                end)
+            end
+
+            TweenService:Create(MenuFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                Size = UDim2.new(0, menuWidth, 0, menuHeight)
+            }):Play()
+        end
+    end)
+end
+
+-- ==============================================================================
+-- 🌫️ SYSTEM 5: CINEMATIC POST-PROCESSING ENGINE
+-- ==============================================================================
+function Visuals:ApplyCinematicProfile(profileName, themeAccent)
+    self:DisablePostProcessing()
+
+    local depth = Instance.new("DepthOfFieldEffect")
+    depth.Name = "EvokFX_DOF"
+    depth.Parent = Lighting
+
+    local colorCor = Instance.new("ColorCorrectionEffect")
+    colorCor.Name = "EvokFX_CC"
+    colorCor.Parent = Lighting
+
+    local bloom = Instance.new("BloomEffect")
+    bloom.Name = "EvokFX_Bloom"
+    bloom.Parent = Lighting
+
+    if profileName == "VibrantAcrylic" then
+        depth.FarIntensity = 0; depth.FocusDistance = 0.05; depth.InFocusRadius = 0; depth.NearIntensity = 1
+        colorCor.Brightness = 0.02; colorCor.Contrast = 0.15; colorCor.Saturation = 0.3
+        colorCor.TintColor = Color3.new(1, 1, 1):Lerp(themeAccent, 0.1)
+        bloom.Intensity = 0.4; bloom.Size = 20; bloom.Threshold = 0.8
+    elseif profileName == "MutedNight" then
+        depth.FarIntensity = 0; depth.FocusDistance = 0.05; depth.InFocusRadius = 0; depth.NearIntensity = 0.8
+        colorCor.Brightness = -0.1; colorCor.Contrast = 0.05; colorCor.Saturation = -0.5
+        colorCor.TintColor = Color3.fromRGB(200, 200, 255)
+        bloom.Intensity = 0.2; bloom.Size = 10; bloom.Threshold = 1.5
+    else -- Default Acrylic
+        depth.FarIntensity = 0; depth.FocusDistance = 0.05; depth.InFocusRadius = 0; depth.NearIntensity = 1
+        colorCor.Brightness = -0.05; colorCor.Contrast = 0.1; colorCor.Saturation = -0.2
+        colorCor.TintColor = Color3.new(1, 1, 1):Lerp(themeAccent, 0.05)
+        bloom.Intensity = 0; bloom.Size = 0; bloom.Threshold = 2
+    end
+
+    self.PostProcessing["DOF"] = depth
+    self.PostProcessing["CC"] = colorCor
+    self.PostProcessing["Bloom"] = bloom
+
+    local conn = RunService.RenderStepped:Connect(function()
+        if depth.Parent then depth.FocusDistance = 0.05 end
+    end)
+    table.insert(self.Connections, conn)
+end
+
+function Visuals:DisablePostProcessing()
+    for _, inst in pairs(self.PostProcessing) do
+        if inst and inst.Parent then inst:Destroy() end
+    end
+    table.clear(self.PostProcessing)
+end
+
+-- ==============================================================================
+-- 📜 SYSTEM 6: ULTIMATE LUAU LEXER (Syntax Highlighting)
+-- ==============================================================================
+local Lexer = {
+    Keywords = {"and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while", "continue", "export", "type", "self"},
+    Globals = {"game", "workspace", "script", "math", "string", "table", "coroutine", "task", "debug", "os", "tick", "Enum", "Color3", "Vector3", "Vector2", "UDim2", "UDim", "CFrame", "Instance", "TweenInfo", "RaycastParams", "ColorSequence", "NumberSequence", "require", "pcall", "xpcall", "assert", "error", "print", "warn", "setmetatable", "getmetatable", "typeof", "type", "pairs", "ipairs", "next", "unpack", "select"},
+    Methods = {"Connect", "Wait", "Destroy", "Clone", "FindFirstChild", "WaitForChild", "GetService", "GetChildren", "GetDescendants", "Lerp", "Play", "Pause", "Cancel", "IsA", "GetPropertyChangedSignal", "Disconnect"},
+    Operators = {"+", "-", "*", "/", "%", "^", "#", "==", "~=", "<=", ">=", "<", ">", "=", ":", "%."},
+    
+    Colors = {
+        Keyword = "#FF7B72",   
+        Global = "#79C0FF",    
+        Method = "#D2A8FF",    
+        String = "#A5D6FF",    
+        Number = "#79C0FF",    
+        Comment = "#8B949E",   
+        Operator = "#C9D1D9",  
+        Type = "#FFA657",
+        Default = "#C9D1D9",
+        LineNum = "#484F58"
+    }
+}
+
+local function ParseSyntax(code)
+    code = code:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+    
+    -- Multiline Comments
+    code = code:gsub("(%-%-%[%[.-%]%])", "<font color='" .. Lexer.Colors.Comment .. "'>%1</font>")
+    -- Single line comments
+    code = code:gsub("(%-%-[^\n]*)", "<font color='" .. Lexer.Colors.Comment .. "'>%1</font>")
+    
+    -- Multiline Strings
+    code = code:gsub("(%[%[.-%]%])", "<font color='" .. Lexer.Colors.String .. "'>%1</font>")
+    -- Single line Strings
+    code = code:gsub("(\"[^\"]*\")", "<font color='" .. Lexer.Colors.String .. "'>%1</font>")
+    code = code:gsub("('[^']*')", "<font color='" .. Lexer.Colors.String .. "'>%1</font>")
+    
+    -- Numbers
+    code = code:gsub("([^%a%w_])(%d+%.?%d*)", "%1<font color='" .. Lexer.Colors.Number .. "'>%2</font>")
+    if tonumber(code:sub(1, 1)) then 
+        code = code:gsub("^(%d+%.?%d*)", "<font color='" .. Lexer.Colors.Number .. "'>%1</font>")
+    end
+
+    -- Operators
+    for _, op in ipairs(Lexer.Operators) do
+        local escapedOp = op:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+        code = code:gsub("(" .. escapedOp .. ")", "<font color='" .. Lexer.Colors.Operator .. "'>%1</font>")
+    end
+
+    -- Keywords
+    for _, word in ipairs(Lexer.Keywords) do
+        code = code:gsub("([^%a%w_])(" .. word .. ")([^%a%w_])", "%1<font color='" .. Lexer.Colors.Keyword .. "'>%2</font>%3")
+        code = code:gsub("^(" .. word .. ")([^%a%w_])", "<font color='" .. Lexer.Colors.Keyword .. "'>%1</font>%2")
+        code = code:gsub("([^%a%w_])(" .. word .. ")$", "%1<font color='" .. Lexer.Colors.Keyword .. "'>%2</font>")
+    end
+
+    -- Globals
+    for _, word in ipairs(Lexer.Globals) do
+        code = code:gsub("([^%a%w_])(" .. word .. ")([^%a%w_])", "%1<font color='" .. Lexer.Colors.Global .. "'>%2</font>%3")
+        code = code:gsub("^(" .. word .. ")([^%a%w_])", "<font color='" .. Lexer.Colors.Global .. "'>%1</font>%2")
+    end
+
+    -- Methods
+    for _, word in ipairs(Lexer.Methods) do
+        code = code:gsub(":%s*(" .. word .. ")([^%a%w_])", ":<font color='" .. Lexer.Colors.Method .. "'>%1</font>%2")
+        code = code:gsub("%.%s*(" .. word .. ")([^%a%w_])", ".<font color='" .. Lexer.Colors.Method .. "'>%1</font>%2")
+    end
+
+    return code
+end
+
+local function CountLines(str)
+    local _, count = string.gsub(str, "\n", "")
+    return count + 1
+end
+
+function Visuals:InjectScriptViewer(CoreInstance)
+    local Core = CoreInstance.Core
+
+    function CoreInstance.Tabs.CreateSection:CreateScriptViewer(opts)
+        local rawCode = opts.Code or "-- Initialize"
+        local height = opts.Height or 300
+        local SecFrame = self.Container 
+
+        local ViewerFrame = Instance.new("Frame")
+        ViewerFrame.Size = UDim2.new(1, 0, 0, height)
+        ViewerFrame.BackgroundColor3 = Core.Math.Color.Darken(Core.Themes.Background, 0.05)
+        ViewerFrame.ClipsDescendants = true
+        ViewerFrame.Parent = SecFrame
+        Instance.new("UICorner", ViewerFrame).CornerRadius = UDim.new(0, 6)
+        local ViewerStroke = Instance.new("UIStroke", ViewerFrame)
+        ViewerStroke.Color = Core.Themes.Border
+
+        local LineNumberGutter = Instance.new("Frame")
+        LineNumberGutter.Size = UDim2.new(0, 35, 1, 0)
+        LineNumberGutter.BackgroundColor3 = Core.Themes.Container
+        LineNumberGutter.BorderSizePixel = 0
+        LineNumberGutter.Parent = ViewerFrame
+
+        local GutterLine = Instance.new("Frame")
+        GutterLine.Size = UDim2.new(0, 1, 1, 0)
+        GutterLine.Position = UDim2.new(1, 0, 0, 0)
+        GutterLine.BackgroundColor3 = Core.Themes.Border
+        GutterLine.BorderSizePixel = 0
+        GutterLine.Parent = LineNumberGutter
+
+        local Scroll = Instance.new("ScrollingFrame")
+        Scroll.Size = UDim2.new(1, -35, 1, 0)
+        Scroll.Position = UDim2.new(0, 35, 0, 0)
+        Scroll.BackgroundTransparency = 1
+        Scroll.ScrollBarThickness = 4
+        Scroll.ScrollBarImageColor3 = Core.Themes.Border
+        Scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        Scroll.Parent = ViewerFrame
+
+        local CodePadding = Instance.new("UIPadding")
+        CodePadding.PaddingTop = UDim.new(0, 10)
+        CodePadding.PaddingBottom = UDim.new(0, 10)
+        CodePadding.PaddingLeft = UDim.new(0, 10)
+        CodePadding.PaddingRight = UDim.new(0, 10)
+        CodePadding.Parent = Scroll
+
+        local CodeLabel = Instance.new("TextLabel")
+        CodeLabel.Size = UDim2.new(1, 0, 1, 0)
+        CodeLabel.AutomaticSize = Enum.AutomaticSize.XY
+        CodeLabel.BackgroundTransparency = 1
+        CodeLabel.TextColor3 = Core.Themes.Text
+        CodeLabel.RichText = true
+        CodeLabel.Font = Enum.Font.Code
+        CodeLabel.TextSize = 12
+        CodeLabel.TextXAlignment = Enum.TextXAlignment.Left
+        CodeLabel.TextYAlignment = Enum.TextYAlignment.Top
+        CodeLabel.Parent = Scroll
+
+        local LineScroll = Instance.new("ScrollingFrame")
+        LineScroll.Size = UDim2.new(1, 0, 1, 0)
+        LineScroll.BackgroundTransparency = 1
+        LineScroll.ScrollBarThickness = 0
+        LineScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        LineScroll.ScrollingEnabled = false
+        LineScroll.Parent = LineNumberGutter
+
+        local LinePadding = Instance.new("UIPadding")
+        LinePadding.PaddingTop = UDim.new(0, 10)
+        LinePadding.PaddingBottom = UDim.new(0, 10)
+        LinePadding.Parent = LineScroll
+
+        local LineLabel = Instance.new("TextLabel")
+        LineLabel.Size = UDim2.new(1, -5, 1, 0)
+        LineLabel.AutomaticSize = Enum.AutomaticSize.Y
+        LineLabel.BackgroundTransparency = 1
+        LineLabel.TextColor3 = Core.Math.Color.FromHex(Lexer.Colors.LineNum)
+        LineLabel.Font = Enum.Font.Code
+        LineLabel.TextSize = 12
+        LineLabel.TextXAlignment = Enum.TextXAlignment.Right
+        LineLabel.TextYAlignment = Enum.TextYAlignment.Top
+        LineLabel.Parent = LineScroll
+
+        Scroll:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+            LineScroll.CanvasPosition = Vector2.new(0, Scroll.CanvasPosition.Y)
+        end)
+
+        local function UpdateViewer(text)
+            rawCode = text
+            CodeLabel.Text = ParseSyntax(text)
+            
+            local lines = CountLines(text)
+            local lineStr = ""
+            for i = 1, lines do lineStr = lineStr .. tostring(i) .. "\n" end
+            LineLabel.Text = lineStr
+            
+            -- Context Menu Integration for Lexer
+            if Visuals.ContextMenuGUI then
+                Visuals.ContextMenu:Create(ViewerFrame, {
+                    {Name = "Copy All Code", Callback = function() 
+                        if setclipboard then setclipboard(rawCode) end 
+                    end},
+                    {Name = "Clear Viewer", Callback = function() UpdateViewer("-- Cleared") end}
+                })
+            end
+        end
+
+        UpdateViewer(rawCode)
+
+        Core:SubscribeToTheme(function(theme)
+            ViewerFrame.BackgroundColor3 = Core.Math.Color.Darken(theme.Background, 0.05)
+            ViewerStroke.Color = theme.Border
+            LineNumberGutter.BackgroundColor3 = theme.Container
+            GutterLine.BackgroundColor3 = theme.Border
+            Scroll.ScrollBarImageColor3 = theme.Border
+            CodeLabel.TextColor3 = theme.Text
+        end)
+
+        return {
+            SetCode = function(newCode) UpdateViewer(newCode) end,
+            GetCode = function() return rawCode end
+        }
+    end
+end
+
+-- ==============================================================================
+-- 💣 SYSTEM 7: GLOBAL UNLOADER & DEEP GARBAGE COLLECTOR
+-- ==============================================================================
+function Visuals:InjectUnloader(CoreInstance)
+    local Core = CoreInstance.Core
+    local Window = CoreInstance
+
+    function Window:Unload()
+        Core.Logger:Log("Initiating Global Unload Sequence...")
+
+        Visuals:DisablePostProcessing()
+
+        if Visuals.ParticleEngine.Container then
+            Visuals.ParticleEngine.Container:Destroy()
+            Visuals.ParticleEngine.Enabled = false
+        end
+        if Visuals.HitmarkerGUI then Visuals.HitmarkerGUI:Destroy() end
+        if Visuals.DamageNumGUI then Visuals.DamageNumGUI:Destroy() end
+        if Visuals.ContextMenuGUI then Visuals.ContextMenuGUI:Destroy() end
+
+        if Core.Cursor.Instance then
+            Core.Cursor.Instance:Destroy()
+            Core.Cursor.Enabled = false
+            UserInputService.MouseIconEnabled = true
+        end
+
+        for _, conn in ipairs(Visuals.Connections) do
+            if conn.Connected then conn:Disconnect() end
+        end
+        table.clear(Visuals.Connections)
+
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            Camera.CameraSubject = LocalPlayer.Character.Humanoid
+        end
+
+        if Window.GUI then
+            local mainFrame = Window.MainFrame.Parent
+            local outTween = TweenService:Create(mainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, 0, 0, 0)
+            })
+            outTween:Play()
+            outTween.Completed:Wait()
+            
+            Window.GUI:Destroy()
+            Window.GUI = nil
+        end
+        
+        Core.Logger:Log("Unloaded Evok Library completely. Zero Memory Leaks.")
+        if getgenv and getgenv().EvokAPI then getgenv().EvokAPI = nil end
+    end
+end
+
+-- ==============================================================================
+-- 🔗 SYSTEM 8: EXTERNAL API EXPORT & INJECTION BINDING
+-- ==============================================================================
+function Visuals.Inject(CoreInstance)
+    Visuals.ParticleEngine:Init(CoreInstance.GUI)
+    Visuals.Overlay:Init(CoreInstance.GUI)
+    Visuals.DamageNumbers:Init(CoreInstance.GUI)
+    Visuals.ContextMenu:Init(CoreInstance.GUI, CoreInstance.Core)
+    
+    Visuals:InjectScriptViewer(CoreInstance)
+    Visuals:InjectUnloader(CoreInstance)
+
+    local API = {
+        EmitParticles = function(config) Visuals.ParticleEngine:Emit(config) end,
+        DrawHitmarker = function(color, snd) Visuals.Overlay:Hitmarker(color, snd) end,
+        DrawDamage = function(amt, pos, crit) Visuals.DamageNumbers:Show(amt, pos, crit) end,
+        ToggleCinematic = function(profile) 
+            if profile then Visuals:ApplyCinematicProfile(profile, CoreInstance.Core.Themes.Accent) 
+            else Visuals:DisablePostProcessing() end 
+        end,
+        Notify = function(cfg) CoreInstance.Core:Notify(cfg) end,
+        SetTheme = function(col) CoreInstance.Core:SetTheme("API", col) end,
+        Unload = function() CoreInstance:Unload() end
+    }
+
+    if getgenv then getgenv().EvokAPI = API end
+    CoreInstance.Core.Logger:Log("VisualsAPI Injected & Global API Exported.")
+    return API
+end
+
+return Visuals
