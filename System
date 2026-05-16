@@ -1,14 +1,13 @@
 -- ==============================================================================
--- ⚙️ EVOK UI LIBRARY - PART 4: SYSTEMS ENGINE (Systems.lua)
--- Version: 2.0.0 | Developer: Senior UI/UX Engineer (Evok)
--- Build: Enterprise Integrated Tools (CLI, Search, Configs, ESP, Themes)
--- Lines: 850+ Guaranteed
+-- ⚙️ EVOK UI LIBRARY - PART 4: SYSTEMS ENGINE (System.lua)
+-- Version: 5.0.0 | Developer: Senior UI/UX Engineer (Evok)
+-- Build: Advanced Structural Systems | 800+ Lines Guaranteed
 -- ==============================================================================
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
@@ -18,29 +17,83 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
 -- ==============================================================================
--- 🛡️ COMPATIBILIDADE DE EXECUTOR (FileSystem Fallbacks)
+-- 📐 LUAU TYPES & SYSTEM ARCHITECTURE DEFINITIONS
 -- ==============================================================================
-local isfolder = isfolder or function() return false end
-local makefolder = makefolder or function() end
-local writefile = writefile or function() warn("writefile is not supported") end
-local readfile = readfile or function() return "{}" end
-local listfiles = listfiles or function() return {} end
-local isfile = isfile or function() return false end
-local setclipboard = setclipboard or function() warn("setclipboard is not supported") end
-
-local Systems = {
-    WidgetsRegistry = {},
-    Connections = {},
-    ESPDrawings = {},
-    TerminalOpen = false
+export type RegistryEntry = {
+    ID: string,
+    Tab: any,
+    Section: any,
+    Instance: GuiObject,
+    Type: string,
+    SaveCallback: () -> any,
+    LoadCallback: (any) -> void
 }
 
+export type ProfileMetadata = {
+    Name: string,
+    Created: string,
+    Version: string,
+    WidgetCount: number,
+    Hash: string
+}
+
+local SystemsModule = {
+    Registry = {} :: { [string]: RegistryEntry },
+    ActiveProfiles = {},
+    Connections = {},
+    ESPDrawings = {},
+    Blacklist = {},
+    SearchIndex = {},
+    SelectedSearchIndex = 0,
+    AutoSaveEnabled = false,
+    AutoSaveProfile = "AutoSave",
+    ConfigFolder = "Evok_Profiles",
+    EncryptionKey = 42
+}
+SystemsModule.__index = SystemsModule
+
 -- ==============================================================================
--- 🧮 UTILITY 1: BASE64 ENCODER/DECODER NATIVO
+-- 🛡️ FILE SYSTEM SAFETY WRAPPERS (Executor Compatibility)
+-- ==============================================================================
+local function SafeIsFolder(path: string): boolean
+    local success, result = pcall(function() return isfolder(path) end)
+    return success and result or false
+end
+
+local function SafeMakeFolder(path: string)
+    pcall(function() makefolder(path) end)
+end
+
+local function SafeWriteFile(path: string, content: string)
+    pcall(function() writefile(path, content) end)
+end
+
+local function SafeReadFile(path: string): string
+    local success, result = pcall(function() return readfile(path) end)
+    return success and result or "{}"
+end
+
+local function SafeIsFile(path: string): boolean
+    local success, result = pcall(function() return isfile(path) end)
+    return success and result or false
+end
+
+local function SafeListFiles(path: string): {string}
+    local success, result = pcall(function() return listfiles(path) end)
+    return success and result or {}
+end
+
+local function SafeDeleteFile(path: string)
+    pcall(function() delfile(path) end)
+end
+
+-- ==============================================================================
+-- 🧮 UTILITY 1: NATIVE BASE64 & CRYPTO ENGINES
 -- ==============================================================================
 local Base64 = {}
 local b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-function Base64.Encode(data)
+
+function Base64.Encode(data: string): string
     return ((data:gsub('.', function(x)
         local r, b = "", x:byte()
         for i = 8, 1, -1 do r = r .. (b % 2 ^ i - b % 2 ^ (i - 1) > 0 and "1" or "0") end
@@ -52,7 +105,8 @@ function Base64.Encode(data)
         return b64chars:sub(c + 1, c + 1)
     end) .. ({ "", "==", "=" })[#data % 3 + 1])
 end
-function Base64.Decode(data)
+
+function Base64.Decode(data: string): string
     data = string.gsub(data, '[^' .. b64chars .. '=]', '')
     return (data:gsub('.', function(x)
         if x == "=" then return "" end
@@ -67,694 +121,684 @@ function Base64.Decode(data)
     end))
 end
 
+local function XorCipher(data: string, key: number): string
+    local output = {}
+    for i = 1, #data do
+        local byte = string.byte(data, i)
+        table.insert(output, string.char(bit32.bxor(byte, key)))
+    end
+    return table.concat(output)
+end
+
 -- ==============================================================================
--- 🧮 UTILITY 2: FUZZY MATCHING (Distância de Levenshtein)
+-- 🧮 UTILITY 2: STRING MATH & LEVENSHTEIN DISTANCE
 -- ==============================================================================
-local function Levenshtein(str1, str2)
-    local len1, len2 = #str1, #str2
+local function CalculateDistance(s1: string, s2: string): number
+    local len1, len2 = #s1, #s2
     local matrix = {}
+    
     for i = 0, len1 do matrix[i] = {[0] = i} end
     for j = 0, len2 do matrix[0][j] = j end
+    
     for i = 1, len1 do
         for j = 1, len2 do
-            local cost = (str1:sub(i, i) == str2:sub(j, j) and 0 or 1)
-            matrix[i][j] = math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost)
+            local cost = (s1:sub(i, i) == s2:sub(j, j)) and 0 or 1
+            matrix[i][j] = math.min(
+                matrix[i - 1][j] + 1,     
+                matrix[i][j - 1] + 1,     
+                matrix[i - 1][j - 1] + cost 
+            )
         end
     end
     return matrix[len1][len2]
 end
 
-local function FuzzyMatch(query, text)
+local function PerformFuzzySearch(query: string, text: string): (boolean, number)
     query, text = query:lower(), text:lower()
-    if string.find(text, query, 1, true) then return true, 0 end
-    local dist = Levenshtein(query, text)
-    if dist <= math.clamp(math.floor(#query / 3), 1, 3) then return true, dist end
+    if query == "" then return true, 0 end
+    if text == query then return true, 0 end
+    
+    local foundIndex = string.find(text, query, 1, true)
+    if foundIndex then return true, foundIndex end
+    
+    local distance = CalculateDistance(query, text)
+    local threshold = math.clamp(math.floor(#query * 0.4), 1, 4)
+    
+    if distance <= threshold then return true, distance + 10 end
     return false, 999
 end
 
--- ==============================================================================
--- 🧮 UTILITY 3: STRING SPLIT & PARSER PARA COMANDOS
--- ==============================================================================
-local function SplitString(str, sep)
+local function SplitString(str: string, sep: string): {string}
     if sep == nil then sep = "%s" end
     local t = {}
-    for str in string.gmatch(str, "([^"..sep.."]+)") do table.insert(t, str) end
+    for s in string.gmatch(str, "([^" .. sep .. "]+)") do table.insert(t, s) end
     return t
 end
 
 -- ==============================================================================
--- 💉 INJECTION SYSTEM (Mapeando o Core.lua)
+-- 💉 INJECTION SYSTEM (Conecta com a UI principal)
 -- ==============================================================================
-function Systems.Inject(CoreInstance)
-    local Core = CoreInstance.Core
-    local Window = CoreInstance
-
-    function Window:RegisterWidget(id, tab, section, widgetRef, widgetType, saveValueFunc, loadValueFunc)
-        Systems.WidgetsRegistry[id] = {
-            Tab = tab,
-            Section = section,
-            Ref = widgetRef,
-            Type = widgetType,
-            Save = saveValueFunc,
-            Load = loadValueFunc
-        }
+function SystemsModule.Inject(WindowInstance)
+    local Core = WindowInstance.Core
+    
+    if not SafeIsFolder(SystemsModule.ConfigFolder) then
+        SafeMakeFolder(SystemsModule.ConfigFolder)
     end
 
-    -- ==============================================================================
-    -- 🖥️ SYSTEM 1: EVOK TERMINAL (CLI ENGINE)
-    -- ==============================================================================
-    function Window:CreateTerminal(bindKey)
-        bindKey = bindKey or Enum.KeyCode.F9
-        
-        local TermFrame = Instance.new("Frame")
-        TermFrame.Size = UDim2.new(1, 0, 0, 300)
-        TermFrame.Position = UDim2.new(0, 0, 0, -320)
-        TermFrame.BackgroundColor3 = Core.Math.Color.Darken(Core.Themes.Background, 0.05)
-        TermFrame.BorderSizePixel = 0
-        TermFrame.ZIndex = 100
-        TermFrame.Parent = Window.GUI
-
-        local TermStroke = Instance.new("UIStroke", TermFrame)
-        TermStroke.Color = Core.Themes.Accent
-        TermStroke.Thickness = 2
-        TermStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-
-        local LogScroll = Instance.new("ScrollingFrame")
-        LogScroll.Size = UDim2.new(1, -20, 1, -45)
-        LogScroll.Position = UDim2.new(0, 10, 0, 10)
-        LogScroll.BackgroundTransparency = 1
-        LogScroll.ScrollBarThickness = 4
-        LogScroll.ScrollBarImageColor3 = Core.Themes.Accent
-        LogScroll.ZIndex = 101
-        LogScroll.Parent = TermFrame
-
-        local LogLayout = Instance.new("UIListLayout", LogScroll)
-        LogLayout.SortOrder = Enum.SortOrder.LayoutOrder
-        LogLayout.Padding = UDim.new(0, 2)
-
-        local InputBg = Instance.new("Frame")
-        InputBg.Size = UDim2.new(1, -20, 0, 25)
-        InputBg.Position = UDim2.new(0, 10, 1, -30)
-        InputBg.BackgroundColor3 = Core.Themes.Container
-        InputBg.ZIndex = 101
-        InputBg.Parent = TermFrame
-        Instance.new("UICorner", InputBg).CornerRadius = UDim.new(0, 4)
-
-        local Prefix = Instance.new("TextLabel")
-        Prefix.Size = UDim2.new(0, 20, 1, 0)
-        Prefix.BackgroundTransparency = 1
-        Prefix.Text = ">"
-        Prefix.TextColor3 = Core.Themes.Accent
-        Prefix.Font = Enum.Font.Code
-        Prefix.TextSize = 14
-        Prefix.ZIndex = 102
-        Prefix.Parent = InputBg
-
-        local CmdInput = Instance.new("TextBox")
-        CmdInput.Size = UDim2.new(1, -30, 1, 0)
-        CmdInput.Position = UDim2.new(0, 20, 0, 0)
-        CmdInput.BackgroundTransparency = 1
-        CmdInput.Text = ""
-        CmdInput.PlaceholderText = "Type 'help' for commands..."
-        CmdInput.TextColor3 = Core.Themes.Text
-        CmdInput.PlaceholderColor3 = Core.Themes.TextMuted
-        CmdInput.Font = Enum.Font.Code
-        CmdInput.TextSize = 13
-        CmdInput.TextXAlignment = Enum.TextXAlignment.Left
-        CmdInput.ClearTextOnFocus = false
-        CmdInput.ZIndex = 102
-        CmdInput.Parent = InputBg
-
-        local function PrintLog(msg, msgType)
-            local color = Core.Themes.Text
-            if msgType == "Error" then color = Core.Themes.Error
-            elseif msgType == "Warning" then color = Core.Themes.Warning
-            elseif msgType == "Success" then color = Core.Themes.Success
-            elseif msgType == "System" then color = Core.Themes.Accent end
-
-            local LogLine = Instance.new("TextLabel")
-            LogLine.Size = UDim2.new(1, 0, 0, 16)
-            LogLine.BackgroundTransparency = 1
-            LogLine.Text = tostring(msg)
-            LogLine.TextColor3 = color
-            LogLine.Font = Enum.Font.Code
-            LogLine.TextSize = 12
-            LogLine.TextWrapped = true
-            LogLine.TextXAlignment = Enum.TextXAlignment.Left
-            LogLine.ZIndex = 102
-            LogLine.Parent = LogScroll
-
-            LogLine:GetPropertyChangedSignal("TextBounds"):Connect(function()
-                LogLine.Size = UDim2.new(1, 0, 0, LogLine.TextBounds.Y)
-            end)
-
-            LogScroll.CanvasSize = UDim2.new(0, 0, 0, LogLayout.AbsoluteContentSize.Y)
-            LogScroll.CanvasPosition = Vector2.new(0, LogLayout.AbsoluteContentSize.Y)
+    function WindowInstance:RegisterWidget(config: RegistryEntry)
+        if not config.ID or SystemsModule.Registry[config.ID] then 
+            Core.Logger:Warn("Widget registration skip or crash on ID: " .. tostring(config.ID))
+            return 
         end
-
-        local Commands = {
-            help = function(args)
-                PrintLog("Available Commands:", "System")
-                PrintLog("  help - Shows this list")
-                PrintLog("  clear - Clears terminal output")
-                PrintLog("  esp [on/off] - Toggles Master ESP")
-                PrintLog("  tp [player name] - Teleports to a player")
-                PrintLog("  theme [hex/rgb] - Changes UI Accent Color")
-                PrintLog("  unload - Destroys the UI entirely")
-            end,
-            clear = function(args)
-                for _, child in ipairs(LogScroll:GetChildren()) do
-                    if child:IsA("TextLabel") then child:Destroy() end
-                end
-            end,
-            esp = function(args)
-                local state = string.lower(args[1] or "")
-                if state == "on" or state == "true" or state == "1" then
-                    -- Assume ESPEngine exists and is exposed or we find it
-                    PrintLog("ESP Master Switch Enabled", "Success")
-                    -- Here we would call the internal ESP var, simulating via hook:
-                    Core:Notify({Title="Terminal", Text="ESP Enabled via CLI", Type="Success"})
-                elseif state == "off" or state == "false" or state == "0" then
-                    PrintLog("ESP Master Switch Disabled", "Error")
-                else
-                    PrintLog("Usage: esp [on/off]", "Warning")
-                end
-            end,
-            tp = function(args)
-                local targetName = args[1]
-                if not targetName then return PrintLog("Usage: tp [player_name]", "Warning") end
-                local found = false
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if string.lower(p.Name):find(string.lower(targetName)) or string.lower(p.DisplayName):find(string.lower(targetName)) then
-                        local char = p.Character
-                        local myChar = LocalPlayer.Character
-                        if char and myChar and char:FindFirstChild("HumanoidRootPart") and myChar:FindFirstChild("HumanoidRootPart") then
-                            myChar.HumanoidRootPart.CFrame = char.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
-                            PrintLog("Teleported to " .. p.DisplayName, "Success")
-                            found = true; break
-                        end
-                    end
-                end
-                if not found then PrintLog("Player not found or dead.", "Error") end
-            end,
-            unload = function(args)
-                PrintLog("Unloading UI...", "System")
-                task.wait(0.5)
-                Window:Unload()
-            end
-        }
-
-        CmdInput.FocusLost:Connect(function(enterPressed)
-            if enterPressed then
-                local text = CmdInput.Text
-                if text == "" then return end
-                CmdInput.Text = ""
-                PrintLog("> " .. text, "TextMuted")
-
-                local args = SplitString(text, " ")
-                local cmd = string.lower(table.remove(args, 1))
-
-                if Commands[cmd] then
-                    pcall(function() Commands[cmd](args) end)
-                else
-                    PrintLog("Command '" .. cmd .. "' not found. Type 'help'.", "Error")
-                end
-            end
-        end)
-
-        UserInputService.InputBegan:Connect(function(input, gpe)
-            if input.KeyCode == bindKey then
-                Systems.TerminalOpen = not Systems.TerminalOpen
-                if Systems.TerminalOpen then
-                    Core:Tween(TermFrame, {Position = UDim2.new(0, 0, 0, 0)}, 0.4, Enum.EasingStyle.Expo, Enum.EasingDirection.Out)
-                    CmdInput:CaptureFocus()
-                else
-                    Core:Tween(TermFrame, {Position = UDim2.new(0, 0, 0, -320)}, 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-                    CmdInput:ReleaseFocus()
-                end
-            end
-        end)
-
-        PrintLog("Evok Terminal v1.0. Press F9 to toggle.", "System")
+        SystemsModule.Registry[config.ID] = config
     end
 
     -- ==============================================================================
-    -- 🔍 SYSTEM 2: GLOBAL SEARCH ENGINE (TopBar Integration)
+    -- 🔍 SYSTEM 1: FUZZY SEARCH ENGINE 3.0 (Arrow Navigation & RichText Highlights)
     -- ==============================================================================
-    function Window:CreateGlobalSearch()
+    function WindowInstance:CreateGlobalSearch()
+        local TopBar = WindowInstance.MainFrame:WaitForChild("TopBar")
+        
         local SearchFrame = Instance.new("Frame")
-        SearchFrame.Size = UDim2.new(0, 200, 0, 24)
-        SearchFrame.Position = UDim2.new(1, -210, 0.5, -12)
+        SearchFrame.Name = "GlobalSearch"
+        SearchFrame.Size = UDim2.new(0, 180, 0, 24)
+        SearchFrame.Position = UDim2.new(1, -195, 0, 8)
         SearchFrame.BackgroundColor3 = Core.Themes.Container
-        SearchFrame.Parent = Window.MainFrame:WaitForChild("TopBar")
-        Instance.new("UICorner", SearchFrame).CornerRadius = UDim.new(0, 4)
-        local SearchStroke = Instance.new("UIStroke", SearchFrame)
-        SearchStroke.Color = Core.Themes.Border
-
-        local SearchIcon = Instance.new("TextLabel")
-        SearchIcon.Size = UDim2.new(0, 24, 1, 0)
-        SearchIcon.BackgroundTransparency = 1
-        SearchIcon.Text = "🔍"
-        SearchIcon.TextColor3 = Core.Themes.TextMuted
-        SearchIcon.TextSize = 12
-        SearchIcon.Parent = SearchFrame
-
-        local SearchInput = Instance.new("TextBox")
-        SearchInput.Size = UDim2.new(1, -30, 1, 0)
-        SearchInput.Position = UDim2.new(0, 26, 0, 0)
-        SearchInput.BackgroundTransparency = 1
-        SearchInput.Text = ""
-        SearchInput.PlaceholderText = "Search UI..."
-        SearchInput.TextColor3 = Core.Themes.Text
-        SearchInput.PlaceholderColor3 = Core.Themes.TextMuted
-        SearchInput.Font = Enum.Font.Gotham
-        SearchInput.TextSize = 12
-        SearchInput.TextXAlignment = Enum.TextXAlignment.Left
-        SearchInput.Parent = SearchFrame
-
-        local ResultsContainer = Instance.new("Frame")
-        ResultsContainer.Size = UDim2.new(1, 0, 0, 0)
-        ResultsContainer.Position = UDim2.new(0, 0, 1, 5)
-        ResultsContainer.BackgroundColor3 = Core.Themes.Container
-        ResultsContainer.ClipsDescendants = true
-        ResultsContainer.ZIndex = 50
-        ResultsContainer.Parent = SearchFrame
-        Instance.new("UICorner", ResultsContainer).CornerRadius = UDim.new(0, 4)
-        local ResultsStroke = Instance.new("UIStroke", ResultsContainer)
-        ResultsStroke.Color = Core.Themes.Border
-
-        local ResultsScroll = Instance.new("ScrollingFrame")
-        ResultsScroll.Size = UDim2.new(1, 0, 1, 0)
-        ResultsScroll.BackgroundTransparency = 1
-        ResultsScroll.ScrollBarThickness = 2
-        ResultsScroll.ScrollBarImageColor3 = Core.Themes.Border
-        ResultsScroll.ZIndex = 51
-        ResultsScroll.Parent = ResultsContainer
+        SearchFrame.Parent = TopBar
         
-        local ResultsLayout = Instance.new("UIListLayout", ResultsScroll)
-        ResultsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        local Corner = Instance.new("UICorner")
+        Corner.CornerRadius = UDim.new(0, 4)
+        Corner.Parent = SearchFrame
+        
+        local Stroke = Instance.new("UIStroke")
+        Stroke.Color = Core.Themes.Border
+        Stroke.Thickness = 1
+        Stroke.Parent = SearchFrame
 
-        local function ClearResults()
-            for _, child in pairs(ResultsScroll:GetChildren()) do
-                if child:IsA("TextButton") then child:Destroy() end
+        local Icon = Instance.new("TextLabel")
+        Icon.Size = UDim2.new(0, 24, 1, 0)
+        Icon.BackgroundTransparency = 1
+        Icon.Text = "🔍"
+        Icon.TextColor3 = Core.Themes.TextMuted
+        Icon.TextSize = 11
+        Icon.Font = Enum.Font.Gotham
+        Icon.Parent = SearchFrame
+
+        local Input = Instance.new("TextBox")
+        Input.Size = UDim2.new(1, -30, 1, 0)
+        Input.Position = UDim2.new(0, 26, 0, 0)
+        Input.BackgroundTransparency = 1
+        Input.Text = ""
+        Input.PlaceholderText = "Search features..."
+        Input.TextColor3 = Core.Themes.Text
+        Input.PlaceholderColor3 = Core.Themes.TextMuted
+        Input.Font = Enum.Font.Gotham
+        Input.TextSize = 12
+        Input.TextXAlignment = Enum.TextXAlignment.Left
+        Input.ClearTextOnFocus = false
+        Input.Parent = SearchFrame
+
+        -- Dropdown de Resultados Suspensos Nativos
+        local DropdownResults = Instance.new("Frame")
+        DropdownResults.Name = "SearchResults"
+        DropdownResults.Size = UDim2.new(1, 0, 0, 0)
+        DropdownResults.Position = UDim2.new(0, 0, 1, 4)
+        DropdownResults.BackgroundColor3 = Core.Themes.Container
+        DropdownResults.ClipsDescendants = true
+        DropdownResults.ZIndex = 1000
+        DropdownResults.Parent = SearchFrame
+        Instance.new("UICorner", DropdownResults).CornerRadius = UDim.new(0, 4)
+        local Dropstroke = Instance.new("UIStroke", DropdownResults)
+        Dropstroke.Color = Core.Themes.Border
+
+        local Scroll = Instance.new("ScrollingFrame")
+        Scroll.Size = UDim2.new(1, 0, 1, 0)
+        Scroll.BackgroundTransparency = 1
+        Scroll.ScrollBarThickness = 2
+        Scroll.ScrollBarImageColor3 = Core.Themes.Border
+        Scroll.ZIndex = 1001
+        Scroll.Parent = DropdownResults
+
+        local ScrollLayout = Instance.new("UIListLayout", Scroll)
+        ScrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+        local function ClearList()
+            for _, c in pairs(Scroll:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
+            table.clear(SystemsModule.SearchIndex)
+            SystemsModule.SelectedSearchIndex = 0
+        end
+
+        local function UpdateHighlight(btn, active)
+            if active then
+                Core:Tween(btn, {BackgroundColor3 = Core.Themes.Accent, BackgroundTransparency = 0.2}, 0.1)
+                btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            else
+                Core:Tween(btn, {BackgroundTransparency = 1}, 0.1)
+                btn.TextColor3 = Core.Themes.Text
             end
         end
 
-        SearchInput:GetPropertyChangedSignal("Text"):Connect(function()
-            local query = SearchInput.Text
-            ClearResults()
+        Input:GetPropertyChangedSignal("Text"):Connect(function()
+            local query = Input.Text:gsub("^%s+", ""):gsub("%s+$", "")
+            ClearList()
 
             if query == "" or #query < 2 then
-                Core:Tween(ResultsContainer, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
+                Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
                 return
             end
 
-            local matches = {}
-            for id, data in pairs(Systems.WidgetsRegistry) do
-                local isMatch, dist = FuzzyMatch(query, id)
-                if isMatch then table.insert(matches, {ID = id, Data = data, Dist = dist}) end
+            local matched = {}
+            for id, entry in pairs(SystemsModule.Registry) do
+                local success, score = PerformFuzzySearch(query, id)
+                if success then table.insert(matched, {ID = id, Entry = entry, Score = score}) end
             end
 
-            table.sort(matches, function(a, b) return a.Dist < b.Dist end)
+            table.sort(matched, function(a, b) return a.Score < b.Score end)
 
-            local resultCount = 0
-            for i = 1, math.min(#matches, 6) do
-                local match = matches[i]
-                resultCount = resultCount + 1
+            if #matched == 0 then
+                Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
+                return
+            end
 
+            for i = 1, math.min(#matched, 5) do
+                local item = matched[i]
+                
                 local ResBtn = Instance.new("TextButton")
-                ResBtn.Size = UDim2.new(1, 0, 0, 25)
+                ResBtn.Size = UDim2.new(1, 0, 0, 24)
                 ResBtn.BackgroundTransparency = 1
-                ResBtn.Text = "  " .. match.ID
-                ResBtn.TextColor3 = Core.Themes.Text
                 ResBtn.Font = Enum.Font.Gotham
-                ResBtn.TextSize = 12
+                ResBtn.TextSize = 11
                 ResBtn.TextXAlignment = Enum.TextXAlignment.Left
-                ResBtn.ZIndex = 52
-                ResBtn.Parent = ResultsScroll
-
-                ResBtn.MouseButton1Click:Connect(function()
-                    SearchInput.Text = ""
-                    SearchInput:ReleaseFocus()
-                    Core:Tween(ResultsContainer, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
-                    
-                    for _, t in pairs(Window.Tabs) do
-                        t.Page.Visible = false
-                        Core:Tween(t.Btn, {TextColor3 = Core.Themes.TextMuted}, 0.2)
-                        if t.Page.Name == match.Data.Tab.Page.Name then
-                            t.Page.Visible = true
-                            Core:Tween(t.Btn, {TextColor3 = Core.Themes.Accent}, 0.2)
-                            Window.CurrentTab = match.Data.Tab
-                        end
-                    end
-
-                    local wFrame = match.Data.Ref
-                    if wFrame and wFrame:IsA("GuiObject") then
-                        local ogColor = wFrame.BackgroundColor3
-                        local flashCount = 0
-                        local flashConn
-                        flashConn = RunService.Heartbeat:Connect(function()
-                            flashCount = flashCount + 1
-                            if flashCount % 30 < 15 then wFrame.BackgroundColor3 = Core.Themes.Accent
-                            else wFrame.BackgroundColor3 = ogColor end
-                            if flashCount > 90 then
-                                wFrame.BackgroundColor3 = ogColor
-                                flashConn:Disconnect()
-                            end
-                        end)
-                    end
-                end)
-            end
-
-            if resultCount > 0 then
-                local h = math.min(resultCount * 25, 150)
-                ResultsScroll.CanvasSize = UDim2.new(0, 0, 0, resultCount * 25)
-                Core:Tween(ResultsContainer, {Size = UDim2.new(1, 0, 0, h)}, 0.2, Enum.EasingStyle.Quint)
-            else
-                Core:Tween(ResultsContainer, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
-            end
-        end)
-
-        SearchInput.FocusLost:Connect(function()
-            task.wait(0.2) 
-            Core:Tween(ResultsContainer, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
-        end)
-    end
-
-    -- ==============================================================================
-    -- 💾 SYSTEM 3: CONFIG & THEME MANAGER
-    -- ==============================================================================
-    local ConfigManager = { Folder = "EvokConfigs", ThemeFolder = "EvokThemes", Ext = ".evok" }
-
-    function ConfigManager:Setup()
-        if not isfolder(self.Folder) then makefolder(self.Folder) end
-        if not isfolder(self.ThemeFolder) then makefolder(self.ThemeFolder) end
-    end
-
-    function ConfigManager:SerializeConfig()
-        local data = {}
-        for id, widget in pairs(Systems.WidgetsRegistry) do
-            if widget.Save then
-                local success, val = pcall(widget.Save)
-                if success and val ~= nil then data[id] = val end
-            end
-        end
-        return HttpService:JSONEncode(data)
-    end
-
-    function ConfigManager:DeserializeConfig(jsonString)
-        local success, data = pcall(function() return HttpService:JSONDecode(jsonString) end)
-        if not success or type(data) ~= "table" then return false end
-        for id, val in pairs(data) do
-            if Systems.WidgetsRegistry[id] and Systems.WidgetsRegistry[id].Load then
-                pcall(function() Systems.WidgetsRegistry[id].Load(val) end)
-            end
-        end
-        return true
-    end
-
-    function ConfigManager:SerializeTheme()
-        local themeData = {}
-        for k, color in pairs(Core.Themes) do
-            if typeof(color) == "Color3" then
-                themeData[k] = Core.Math.Color.ToHex(color)
-            end
-        end
-        return HttpService:JSONEncode(themeData)
-    end
-
-    function ConfigManager:DeserializeTheme(jsonString)
-        local success, data = pcall(function() return HttpService:JSONDecode(jsonString) end)
-        if not success or type(data) ~= "table" then return false end
-        
-        for k, hex in pairs(data) do
-            if Core.Themes[k] then
-                pcall(function() Core.Themes[k] = Core.Math.Color.FromHex(hex) end)
-            end
-        end
-        Core:SetTheme("Custom", Core.Themes.Accent) -- Atualiza tudo
-        return true
-    end
-
-    function Window:CreateConfigManager(tabName)
-        ConfigManager:Setup()
-        local CTab = self:CreateTab(tabName or "Settings")
-        
-        -- CONFIG SECTION
-        local CSection = CTab:CreateSection("Profile Configuration", "Left")
-        
-        local function GetProfiles()
-            local list = {}
-            for _, file in ipairs(listfiles(ConfigManager.Folder) or {}) do
-                if file:match("%" .. ConfigManager.Ext .. "$") then
-                    table.insert(list, file:match("([^/%\\]+)%" .. ConfigManager.Ext .. "$"))
-                end
-            end
-            return list
-        end
-
-        local ProfileDropdown = CSection:CreateAdvancedDropdown({
-            Name = "Selected Profile", Options = GetProfiles(), Default = "None"
-        })
-
-        local ProfileInput = CSection:CreateTextBox({
-            Name = "Profile Name", Placeholder = "Type profile name...", Callback = function() end
-        })
-
-        CSection:CreateButton({
-            Name = "Save Profile", Cooldown = 1,
-            Callback = function()
-                local name = ProfileInput:GetValue()
-                if name == "" then name = ProfileDropdown.Selected end
-                if name and name ~= "None" and name ~= "" then
-                    local json = ConfigManager:SerializeConfig()
-                    writefile(ConfigManager.Folder .. "/" .. name .. ConfigManager.Ext, json)
-                    ProfileDropdown:Refresh(GetProfiles())
-                    Core:Notify({Title = "Config System", Text = "Saved successfully: " .. name, Type = "Success", Duration = 3})
+                ResBtn.ZIndex = 1002
+                ResBtn.Parent = Scroll
+                
+                -- Parser RichText para destacar o termo buscado
+                ResBtn.RichText = true
+                local startIdx, endIdx = item.ID:lower():find(query:lower())
+                if startIdx then
+                    local p1 = item.ID:sub(1, startIdx - 1)
+                    local p2 = item.ID:sub(startIdx, endIdx)
+                    local p3 = item.ID:sub(endIdx + 1)
+                    ResBtn.Text = string.format("  %s<b><font color='%s'>%s</font></b>%s", p1, Core.Math.Color.ToHex(Core.Themes.Accent), p2, p3)
                 else
-                    Core:Notify({Title = "Config System", Text = "Invalid profile name.", Type = "Error", Duration = 3})
+                    ResBtn.Text = "  " .. item.ID
                 end
-            end
-        })
 
-        CSection:CreateButton({
-            Name = "Load Profile", Cooldown = 1,
-            Callback = function()
-                local name = ProfileDropdown.Selected
-                if name and name ~= "None" then
-                    local path = ConfigManager.Folder .. "/" .. name .. ConfigManager.Ext
-                    if isfile(path) then
-                        local json = readfile(path)
-                        if ConfigManager:DeserializeConfig(json) then
-                            Core:Notify({Title = "Config System", Text = "Loaded: " .. name, Type = "Success", Duration = 3})
-                        else
-                            Core:Notify({Title = "Config System", Text = "Corrupted profile data.", Type = "Error", Duration = 3})
+                table.insert(SystemsModule.SearchIndex, {Btn = ResBtn, Entry = item.Entry})
+
+                local function ExecuteNavigation()
+                    Input.Text = ""
+                    Input:ReleaseFocus()
+                    Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
+
+                    -- Força viagem de abas
+                    for _, tab in pairs(WindowInstance.Tabs) do
+                        tab.Page.Visible = false
+                        Core:Tween(tab.Btn, {TextColor3 = Core.Themes.TextMuted}, 0.2)
+                        if tab.Page.Name == item.Entry.Tab.Page.Name then
+                            tab.Page.Visible = true
+                            Core:Tween(tab.Btn, {TextColor3 = Core.Themes.Accent}, 0.2)
+                            WindowInstance.CurrentTab = tab
+                        end
+                    end
+
+                    -- Efeito visual de piscada no componente (Highlight Flash)
+                    task.spawn(function()
+                        local ref = item.Entry.Instance
+                        if ref and ref:IsA("GuiObject") then
+                            local oldColor = ref.BackgroundColor3
+                            for k = 1, 3 do
+                                ref.BackgroundColor3 = Core.Themes.Accent
+                                task.wait(0.15)
+                                ref.BackgroundColor3 = oldColor
+                                task.wait(0.15)
+                            end
+                        end
+                    end)
+                end
+
+                ResBtn.MouseButton1Click:Connect(ExecuteNavigation)
+            end
+
+            local calculatedHeight = math.min(#SystemsModule.SearchIndex * 24, 120)
+            Scroll.CanvasSize = UDim2.new(0, 0, 0, #SystemsModule.SearchIndex * 24)
+            Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, calculatedHeight)}, 0.2, Enum.EasingStyle.Quint)
+        end)
+
+        -- Escuta de navegação via setas direcionais do teclado
+        Input.Focused:Connect(function()
+            Core:Tween(Stroke, {Color = Core.Themes.Accent}, 0.2)
+            local navConn = UserInputService.InputBegan:Connect(function(input, gpe)
+                if #SystemsModule.SearchIndex == 0 then return end
+                
+                if input.KeyCode == Enum.KeyCode.Down then
+                    if SystemsModule.SelectedSearchIndex > 0 then
+                        UpdateHighlight(SystemsModule.SearchIndex[SystemsModule.SelectedSearchIndex].Btn, false)
+                    end
+                    SystemsModule.SelectedSearchIndex = (SystemsModule.SelectedSearchIndex >= #SystemsModule.SearchIndex) and 1 or SystemsModule.SelectedSearchIndex + 1
+                    UpdateHighlight(SystemsModule.SearchIndex[SystemsModule.SelectedSearchIndex].Btn, true)
+                elseif input.KeyCode == Enum.KeyCode.Up then
+                    if SystemsModule.SelectedSearchIndex > 0 then
+                        UpdateHighlight(SystemsModule.SearchIndex[SystemsModule.SelectedSearchIndex].Btn, false)
+                    end
+                    SystemsModule.SelectedSearchIndex = (SystemsModule.SelectedSearchIndex <= 1) and #SystemsModule.SearchIndex or SystemsModule.SelectedSearchIndex - 1
+                    UpdateHighlight(SystemsModule.SearchIndex[SystemsModule.SelectedSearchIndex].Btn, true)
+                elseif input.KeyCode == Enum.KeyCode.Return and SystemsModule.SelectedSearchIndex > 0 then
+                    local target = SystemsModule.SearchIndex[SystemsModule.SelectedSearchIndex]
+                    if target then
+                        -- Força o clique programático
+                        Input.Text = ""
+                        Input:ReleaseFocus()
+                        Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
+                        for _, tab in pairs(WindowInstance.Tabs) do
+                            tab.Page.Visible = false
+                            if tab.Page.Name == target.Entry.Tab.Page.Name then
+                                tab.Page.Visible = true
+                                WindowInstance.CurrentTab = tab
+                            end
                         end
                     end
                 end
+            end)
+            
+            local focusLostConn; focusLostConn = Input.FocusLost:Connect(function()
+                navConn:Disconnect()
+                focusLostConn:Disconnect()
+                task.wait(0.15)
+                Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
+            end)
+        end)
+
+        Core:SubscribeToTheme(function(theme)
+            SearchFrame.BackgroundColor3 = theme.Container
+            Stroke.Color = theme.Border
+            Input.TextColor3 = theme.Text
+            Input.PlaceholderColor3 = theme.TextMuted
+            DropdownResults.BackgroundColor3 = theme.Container
+            Dropstroke.Color = theme.Border
+            Scroll.ScrollBarImageColor3 = theme.Border
+        end)
+    end
+
+    -- ==============================================================================
+    -- 💾 SYSTEM 2: ADVANCED PROFILE ENGINE (Crypto, AutoSave & Flattening)
+    -- ==============================================================================
+    local ProfileManager = {}
+
+    function ProfileManager:GetProfiles(): {string}
+        local files = SafeListFiles(SystemsModule.ConfigFolder)
+        local profiles = {}
+        for _, file in ipairs(files) do
+            if file:match("%.json$") then
+                local name = file:match("([^/%\\]+)%.json$")
+                if name then table.insert(profiles, name) end
             end
-        })
+        end
+        return profiles
+    end
+
+    function ProfileManager:GenerateIntegrityHash(dataString: string): string
+        local hash = 0
+        for i = 1, #dataString do
+            hash = (hash * 31 + string.byte(dataString, i)) % 2^32
+        end
+        return string.format("%X", hash)
+    end
+
+    function ProfileManager:Save(profileName: string)
+        local runtimeData = {}
+        for id, widget in pairs(SystemsModule.Registry) do
+            if widget.SaveCallback then
+                local success, stateValue = pcall(widget.SaveCallback)
+                if success and stateValue ~= nil then
+                    runtimeData[id] = stateValue
+                end
+            end
+        end
+
+        local rawPayload = HttpService:JSONEncode(runtimeData)
+        local encryptedPayload = Base64.Encode(XorCipher(rawPayload, SystemsModule.EncryptionKey))
         
-        CSection:CreateButton({
-            Name = "Export Profile to Base64",
+        local package: ProfileMetadata = {
+            Name = profileName,
+            Created = os.date("%Y-%m-%d %H:%M:%S"),
+            Version = "5.0.0",
+            WidgetCount = table.create(#runtimeData),
+            Hash = self:GenerateIntegrityHash(encryptedPayload)
+        }
+
+        local finalWrapper = HttpService:JSONEncode({
+            Envelope = package,
+            Payload = encryptedPayload
+        })
+
+        local path = SystemsModule.ConfigFolder .. "/" .. profileName .. ".json"
+        SafeWriteFile(path, finalWrapper)
+        Core:Notify({Title = "Profile Engine", Text = "Configuration '" .. profileName .. "' synchronized.", Type = "Success", Duration = 3})
+    end
+
+    function ProfileManager:Load(profileName: string)
+        local path = SystemsModule.ConfigFolder .. "/" .. profileName .. ".json"
+        if not SafeIsFile(path) then return end
+
+        local fileContent = SafeReadFile(path)
+        local success, rootTable = pcall(function() return HttpService:JSONDecode(fileContent) end)
+        
+        if not success or type(rootTable) ~= "table" or not rootTable.Envelope or not rootTable.Payload then
+            Core:Notify({Title = "Profile Error", Text = "Failed to parse profile manifest.", Type = "Error", Duration = 4})
+            return
+        end
+
+        -- Verificação de integridade antifalsificação de hash
+        local currentHash = self:GenerateIntegrityHash(rootTable.Payload)
+        if currentHash ~= rootTable.Envelope.Hash then
+            Core:Notify({Title = "Profile Refused", Text = "File corruption detected (Hash mismatch).", Type = "Error", Duration = 4})
+            return
+        end
+
+        local decryptedRaw = XorCipher(Base64.Decode(rootTable.Payload), SystemsModule.EncryptionKey)
+        local parsingSuccess, stateData = pcall(function() return HttpService:JSONDecode(decryptedRaw) end)
+
+        if not parsingSuccess or type(stateData) ~= "table" then return end
+
+        for id, val in pairs(stateData) do
+            local widget = SystemsModule.Registry[id]
+            if widget and widget.LoadCallback then
+                pcall(function() widget.LoadCallback(val) end)
+            end
+        end
+        Core:Notify({Title = "Profile Loaded", Text = "Active configurations updated to match '" .. profileName .. "'.", Type = "Success", Duration = 3})
+    end
+
+    -- Linha de execução assíncrona p/ Auto-Save thread
+    task.spawn(function()
+        while task.wait(30) do
+            if SystemsModule.AutoSaveEnabled then
+                ProfileManager:Save(SystemsModule.AutoSaveProfile)
+                Core.Logger:Log("Background Auto-Save loop triggered.")
+            end
+        end
+    end)
+
+    function WindowInstance:CreateConfigManager(tabName: string)
+        local ManagerTab = self:CreateTab(tabName or "Settings")
+        local SecProfiles = ManagerTab:CreateSection("Profiles", "Left")
+        
+        local cache = ProfileManager:GetProfiles()
+        local SelectionDropdown = SecProfiles:CreateDropdown({
+            Name = "Select Profile", Options = cache, Default = cache[1] or "None"
+        })
+
+        local NewNameInput = SecProfiles:CreateTextBox({
+            Name = "Name Override", Placeholder = "Profile name...", ClearOnFocus = true
+        })
+
+        SecProfiles:CreateToggle({
+            Name = "Enable Background Auto-Save",
+            Default = false,
+            Callback = function(state) SystemsModule.AutoSaveEnabled = state end
+        })
+
+        SecProfiles:CreateButton({
+            Name = "Commit Profile Save", Cooldown = 1,
             Callback = function()
-                setclipboard(Base64.Encode(ConfigManager:SerializeConfig()))
-                Core:Notify({Title = "Export", Text = "Config copied to clipboard!", Type = "Success"})
+                local txt = NewNameInput:GetValue()
+                if txt == "" then txt = SelectionDropdown.Selected end
+                if txt and txt ~= "" and txt ~= "None" then
+                    ProfileManager:Save(txt)
+                    SelectionDropdown:Refresh(ProfileManager:GetProfiles())
+                else
+                    Core:Notify({Title = "Operation Denied", Text = "Provide a structural name string.", Type = "Error"})
+                end
             end
         })
 
-        -- THEME SECTION
-        local TSection = CTab:CreateSection("Theme Customization", "Right")
-
-        TSection:CreateAdvancedColorPicker({
-            Name = "Accent Color", Default = Core.Themes.Accent,
-            Callback = function(col) Core:SetTheme("Custom", col) end
-        })
-        TSection:CreateAdvancedColorPicker({
-            Name = "Background Color", Default = Core.Themes.Background,
-            Callback = function(col) Core.Themes.Background = col; Core:SetTheme("Custom") end
-        })
-        TSection:CreateAdvancedColorPicker({
-            Name = "Container Color", Default = Core.Themes.Container,
-            Callback = function(col) Core.Themes.Container = col; Core:SetTheme("Custom") end
-        })
-        TSection:CreateAdvancedColorPicker({
-            Name = "Text Color", Default = Core.Themes.Text,
-            Callback = function(col) Core.Themes.Text = col; Core:SetTheme("Custom") end
-        })
-
-        TSection:CreateButton({
-            Name = "Export Theme Base64", Cooldown = 1,
+        SecProfiles:CreateButton({
+            Name = "Execute Profile Load", Cooldown = 1,
             Callback = function()
-                setclipboard(Base64.Encode(ConfigManager:SerializeTheme()))
-                Core:Notify({Title = "Theme Export", Text = "Theme copied to clipboard!", Type = "Success"})
+                local target = SelectionDropdown.Selected
+                if target and target ~= "None" and target ~= "" then
+                    ProfileManager:Load(target)
+                end
             end
         })
 
-        local ThemeImport = TSection:CreateTextBox({
-            Name = "Import Theme String", Placeholder = "Paste Base64 here...", Callback = function() end
-        })
-
-        TSection:CreateButton({
-            Name = "Apply Imported Theme",
+        SecProfiles:CreateButton({
+            Name = "Purge Profile File", Cooldown = 2,
             Callback = function()
-                local b64 = ThemeImport:GetValue()
-                if b64 and b64 ~= "" then
-                    local success, json = pcall(function() return Base64.Decode(b64) end)
-                    if success and ConfigManager:DeserializeTheme(json) then
-                        Core:Notify({Title = "Theme Import", Text = "Custom theme applied!", Type = "Success"})
-                        ThemeImport:Set("")
-                    else
-                        Core:Notify({Title = "Theme Import", Text = "Invalid theme string.", Type = "Error"})
-                    end
+                local target = SelectionDropdown.Selected
+                if target and target ~= "None" and target ~= "" then
+                    SafeDeleteFile(SystemsModule.ConfigFolder .. "/" .. target .. ".json")
+                    local list = ProfileManager:GetProfiles()
+                    SelectionDropdown:Refresh(list)
+                    SelectionDropdown.Selected = list[1] or "None"
                 end
             end
         })
     end
 
     -- ==============================================================================
-    -- 👁️ SYSTEM 4: ESP ENGINE & PLAYER MANAGER (Drawing API)
+    -- 👥 SYSTEM 3: PLAYER MANAGER & RAYCAST OCCLUSION ESP ENGINE
     -- ==============================================================================
     local ESPEngine = {
-        Enabled = false, Boxes = false, Names = false, Health = false,
-        Tracers = false, MaxDistance = 1000, Color = Core.Themes.Accent
+        Active = false, Boxes = false, Names = false, Health = false, Tracers = false,
+        MaxDistance = 1500, VisibleCheck = true,
+        VisColor = Color3.fromRGB(0, 255, 120), InvisibleColor = Color3.fromRGB(255, 40, 40)
     }
 
-    local function CreateESP(player)
-        if Systems.ESPDrawings[player.Name] then return end
-        local d = {
+    local function CreatePlayerDrawings(plr: Player)
+        if SystemsModule.ESPDrawings[plr.Name] then return end
+        local container = {
             BoxOutline = Drawing.new("Square"), Box = Drawing.new("Square"),
-            Name = Drawing.new("Text"),
-            HealthOutline = Drawing.new("Line"), Health = Drawing.new("Line"),
-            Tracer = Drawing.new("Line")
+            NameLabel = Drawing.new("Text"),
+            HealthBg = Drawing.new("Line"), HealthBar = Drawing.new("Line"),
+            TracerLine = Drawing.new("Line")
         }
-        d.BoxOutline.Thickness = 3; d.BoxOutline.Filled = false; d.BoxOutline.Color = Color3.new(0,0,0)
-        d.Box.Thickness = 1; d.Box.Filled = false
-        d.Name.Size = 16; d.Name.Center = true; d.Name.Outline = true; d.Name.Color = Color3.new(1,1,1)
-        d.HealthOutline.Thickness = 3; d.HealthOutline.Color = Color3.new(0,0,0)
-        d.Health.Thickness = 1
-        d.Tracer.Thickness = 1; d.Tracer.Color = Color3.new(1,1,1)
-        Systems.ESPDrawings[player.Name] = d
+        container.BoxOutline.Thickness = 3; container.BoxOutline.Filled = false; container.BoxOutline.Color = Color3.new(0,0,0); container.BoxOutline.Transparency = 0.8
+        container.Box.Thickness = 1; container.Box.Filled = false; container.Box.Transparency = 1
+        container.NameLabel.Size = 13; container.NameLabel.Center = true; container.NameLabel.Outline = true; container.NameLabel.Color = Color3.new(1,1,1)
+        container.HealthBg.Thickness = 3; container.HealthBg.Color = Color3.new(0,0,0); container.HealthBg.Transparency = 0.8
+        container.HealthBar.Thickness = 1; container.HealthBar.Transparency = 1
+        container.TracerLine.Thickness = 1; container.TracerLine.Transparency = 0.8
+        
+        SystemsModule.ESPDrawings[plr.Name] = container
     end
 
-    local function RemoveESP(player)
-        if Systems.ESPDrawings[player.Name] then
-            for _, drawing in pairs(Systems.ESPDrawings[player.Name]) do drawing:Remove() end
-            Systems.ESPDrawings[player.Name] = nil
+    local function ClearPlayerDrawings(plr: Player)
+        local cache = SystemsModule.ESPDrawings[player.Name]
+        if cache then
+            for _, drawing in pairs(cache) do pcall(function() drawing:Remove() end) end
+            SystemsModule.ESPDrawings[player.Name] = nil
         end
     end
 
-    local function UpdateESP()
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                local drawings = Systems.ESPDrawings[player.Name]
-                if not drawings then CreateESP(player); drawings = Systems.ESPDrawings[player.Name] end
+    -- Engine de cálculo vetorial tridimensional acoplado ao pipeline de renderização
+    local renderConn = RunService.RenderStepped:Connect(function()
+        if not ESPEngine.Active then
+            for _, plrsCache in pairs(SystemsModule.ESPDrawings) do
+                for _, d in pairs(plrsCache) do d.Visible = false end
+            end
+            return
+        end
 
-                local character = player.Character
-                local humanoid = character and character:FindFirstChild("Humanoid")
-                local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+        local localChar = LocalPlayer.Character
+        local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+        if not localRoot then return end
 
-                if ESPEngine.Enabled and character and humanoid and rootPart and humanoid.Health > 0 then
-                    local vector, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
-                    local distance = (Camera.CFrame.Position - rootPart.Position).Magnitude
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and not table.find(SystemsModule.Blacklist, plr.Name) then
+                local data = SystemsModule.ESPDrawings[plr.Name]
+                if not data then CreatePlayerDrawings(plr); data = SystemsModule.ESPDrawings[plr.Name] end
+
+                local char = plr.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                local head = char and char:FindFirstChild("Head")
+
+                if char and root and hum and head and hum.Health > 0 then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+                    local distance = (Camera.CFrame.Position - root.Position).Magnitude
 
                     if onScreen and distance <= ESPEngine.MaxDistance then
-                        local head = character:FindFirstChild("Head")
-                        local headPos = head and Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0)) or vector
-                        local legPos = Camera:WorldToViewportPoint(rootPart.Position - Vector3.new(0, 3, 0))
-                        local height = math.abs(headPos.Y - legPos.Y)
-                        local width = height / 2
+                        -- Cálculo de Oclusão por Raycast (Wall Check)
+                        local renderColor = ESPEngine.VisColor
+                        if ESPEngine.VisibleCheck then
+                            local params = RaycastParams.new()
+                            params.FilterType = Enum.RaycastFilterType.Exclude
+                            params.FilterDescendantsInstances = {localChar, char}
+                            
+                            local rayResult = Workspace:Raycast(Camera.CFrame.Position, root.Position - Camera.CFrame.Position, params)
+                            if rayResult and rayResult.Instance then
+                                renderColor = ESPEngine.InvisibleColor -- Oculto por geometria sólida
+                            end
+                        end
+
+                        -- Projeção de Escala Euclidiana baseada em distância focal
+                        local topPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 1.6, 0))
+                        local bottomPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+                        local h = math.abs(topPos.Y - bottomPos.Y)
+                        local w = h * 0.55
 
                         if ESPEngine.Boxes then
-                            drawings.BoxOutline.Size = Vector2.new(width, height)
-                            drawings.BoxOutline.Position = Vector2.new(vector.X - width/2, headPos.Y)
-                            drawings.BoxOutline.Visible = true
-                            drawings.Box.Size = Vector2.new(width, height)
-                            drawings.Box.Position = Vector2.new(vector.X - width/2, headPos.Y)
-                            drawings.Box.Color = ESPEngine.Color
-                            drawings.Box.Visible = true
+                            data.BoxOutline.Size = Vector2.new(w, h)
+                            data.BoxOutline.Position = Vector2.new(screenPos.X - w/2, topPos.Y)
+                            data.BoxOutline.Visible = true
+
+                            data.Box.Size = Vector2.new(w, h)
+                            data.Box.Position = Vector2.new(screenPos.X - w/2, topPos.Y)
+                            data.Box.Color = renderColor
+                            data.Box.Visible = true
                         else
-                            drawings.BoxOutline.Visible = false; drawings.Box.Visible = false
+                            data.BoxOutline.Visible = false; data.Box.Visible = false
                         end
 
                         if ESPEngine.Names then
-                            drawings.Name.Text = player.DisplayName .. " ["..math.floor(distance).."m]"
-                            drawings.Name.Position = Vector2.new(vector.X, headPos.Y - 20)
-                            drawings.Name.Color = ESPEngine.Color
-                            drawings.Name.Visible = true
+                            data.NameLabel.Text = string.format("%s (%dm)", plr.DisplayName, math.floor(distance))
+                            data.NameLabel.Position = Vector2.new(screenPos.X, topPos.Y - 18)
+                            data.NameLabel.Visible = true
                         else
-                            drawings.Name.Visible = false
+                            data.NameLabel.Visible = false
                         end
 
                         if ESPEngine.Health then
-                            local hpRatio = humanoid.Health / humanoid.MaxHealth
-                            local hpHeight = height * hpRatio
-                            local hpColor = Color3.fromHSV(0.3 * hpRatio, 1, 1)
+                            local hpPercent = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+                            local barHeight = h * hpPercent
+                            
+                            data.HealthBg.From = Vector2.new(screenPos.X - w/2 - 6, topPos.Y)
+                            data.HealthBg.To = Vector2.new(screenPos.X - w/2 - 6, bottomPos.Y)
+                            data.HealthBg.Visible = true
 
-                            drawings.HealthOutline.From = Vector2.new(vector.X - width/2 - 5, headPos.Y)
-                            drawings.HealthOutline.To = Vector2.new(vector.X - width/2 - 5, legPos.Y)
-                            drawings.HealthOutline.Visible = true
-                            drawings.Health.From = Vector2.new(vector.X - width/2 - 5, legPos.Y)
-                            drawings.Health.To = Vector2.new(vector.X - width/2 - 5, legPos.Y - hpHeight)
-                            drawings.Health.Color = hpColor
-                            drawings.Health.Visible = true
+                            data.HealthBar.From = Vector2.new(screenPos.X - w/2 - 6, bottomPos.Y)
+                            data.HealthBar.To = Vector2.new(screenPos.X - w/2 - 6, bottomPos.Y - barHeight)
+                            data.HealthBar.Color = Color3.fromRGB(255, 0, 0):Lerp(Color3.fromRGB(0, 255, 0), hpPercent)
+                            data.HealthBar.Visible = true
                         else
-                            drawings.HealthOutline.Visible = false; drawings.Health.Visible = false
+                            data.HealthBg.Visible = false; data.HealthBar.Visible = false
                         end
 
                         if ESPEngine.Tracers then
-                            drawings.Tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
-                            drawings.Tracer.To = Vector2.new(vector.X, legPos.Y)
-                            drawings.Tracer.Color = ESPEngine.Color
-                            drawings.Tracer.Visible = true
+                            data.TracerLine.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                            data.TracerLine.To = Vector2.new(screenPos.X, bottomPos.Y)
+                            data.TracerLine.Color = renderColor
+                            data.TracerLine.Visible = true
                         else
-                            drawings.Tracer.Visible = false
+                            data.TracerLine.Visible = false
                         end
                     else
-                        for _, drawing in pairs(drawings) do drawing.Visible = false end
+                        for _, d in pairs(data) do d.Visible = false end
                     end
                 else
-                    for _, drawing in pairs(drawings) do drawing.Visible = false end
+                    for _, d in pairs(data) do d.Visible = false end
                 end
             end
         end
-    end
+    end)
+    table.insert(SystemsModule.Connections, renderConn)
+    Players.PlayerRemoving:Connect(ClearPlayerDrawings)
 
-    local espConn = RunService.RenderStepped:Connect(UpdateESP)
-    table.insert(Systems.Connections, espConn)
-    Players.PlayerRemoving:Connect(RemoveESP)
-
-    function Window:CreatePlayerManager(tabName)
-        local PTab = self:CreateTab(tabName or "ESP Engine")
-        local ESPSection = PTab:CreateSection("Visual Settings", "Left")
+    -- Interface de Gerenciamento do ESP e Controle de Alvos
+    function WindowInstance:CreatePlayerManager(tabName: string)
+        local PTab = self:CreateTab(tabName or "Player List")
+        local VisualSec = PTab:CreateSection("ESP Configurations", "Left")
         
-        ESPSection:CreateToggle({
-            Name = "Enable Master ESP", Default = false,
-            Callback = function(val) ESPEngine.Enabled = val end
+        VisualSec:CreateToggle({
+            Name = "Master Activation ESP", Default = false,
+            Callback = function(state) ESPEngine.Active = state end
         })
-        ESPSection:CreateToggle({
-            Name = "Draw Boxes", Default = false,
-            Callback = function(val) ESPEngine.Boxes = val end
+        VisualSec:CreateToggle({
+            Name = "Render 2D Bounding Boxes", Default = false,
+            Callback = function(state) ESPEngine.Boxes = state end
         })
-        ESPSection:CreateToggle({
-            Name = "Draw Names & Distance", Default = false,
-            Callback = function(val) ESPEngine.Names = val end
+        VisualSec:CreateToggle({
+            Name = "Render Entity Name Headers", Default = false,
+            Callback = function(state) ESPEngine.Names = state end
         })
-        ESPSection:CreateToggle({
-            Name = "Draw Health Bars", Default = false,
-            Callback = function(val) ESPEngine.Health = val end
+        VisualSec:CreateToggle({
+            Name = "Render Fractional Health Bars", Default = false,
+            Callback = function(state) ESPEngine.Health = state end
         })
-        ESPSection:CreateToggle({
-            Name = "Draw Tracers", Default = false,
-            Callback = function(val) ESPEngine.Tracers = val end
+        VisualSec:CreateToggle({
+            Name = "Render Vector Screen Tracers", Default = false,
+            Callback = function(state) ESPEngine.Tracers = state end
         })
-        ESPSection:CreateAdvancedColorPicker({
-            Name = "ESP Render Color", Default = Core.Themes.Accent,
-            Callback = function(color) ESPEngine.Color = color end
+        VisualSec:CreateToggle({
+            Name = "Perform Raycast Occulsion Check", Default = true,
+            Callback = function(state) ESPEngine.VisibleCheck = state end
+        })
+
+        local ActionsSec = PTab:CreateSection("Target Action Panel", "Right")
+        
+        local function PopulatePlayerTable(): {string}
+            local tbl = {}
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer then table.insert(tbl, p.Name) end
+            end
+            return tbl
+        end
+
+        local PlrDropdown = ActionsSec:CreateDropdown({
+            Name = "Target Entity", Options = PopulatePlayerTable(), Default = "None"
+        })
+
+        Players.PlayerAdded:Connect(function() PlrDropdown:Refresh(PopulatePlayerTable()) end)
+        Players.PlayerRemoving:Connect(function() PlrDropdown:Refresh(PopulatePlayerTable()) end)
+
+        local activeSpectate = false
+        ActionsSec:CreateButton({
+            Name = "Toggle Camera Spectate",
+            Callback = function()
+                local tName = PlrDropdown.Selected
+                local target = Players:FindFirstChild(tName or "")
+                if target and target.Character then
+                    if activeSpectate then
+                        local myHum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                        if myHum then Camera.CameraSubject = myHum end
+                        activeSpectate = false
+                        Core:Notify({Title = "Spectate", Text = "Camera focused back to LocalPlayer."})
+                    else
+                        local tHum = target.Character:FindFirstChildOfClass("Humanoid")
+                        if tHum then Camera.CameraSubject = tHum end
+                        activeSpectate = true
+                        Core:Notify({Title = "Spectate", Text = "Camera locked on: " .. target.DisplayName})
+                    end
+                end
+            end
+        })
+
+        ActionsSec:CreateButton({
+            Name = "Vector Warp Behind Target", Cooldown = 1.5,
+            Callback = function()
+                local tName = PlrDropdown.Selected
+                local target = Players:FindFirstChild(tName or "")
+                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                local tRoot = target and target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+                
+                if myRoot and tRoot then
+                    myRoot.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3.5)
+                end
+            end
         })
     end
-
-    Core.Logger:Log("All Evok Systems Booted Successfully.")
 end
 
-return Systems
+return SystemsModule
