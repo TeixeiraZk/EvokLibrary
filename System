@@ -1,1 +1,898 @@
+--[[
+    ===========================================================================
+    EVOK UI LIBRARY - PARTE 4: ENTERPRISE PLAYER LIST FRAMEWORK
+    ===========================================================================
+    Versão: 1.0.0-PRO
+    Módulo exclusivo para Player List.
+    Contém:
+    - Motor de Busca Fuzzy (Aproximada)
+    - 6 Algoritmos de Ordenação (Nome, ID, Vida, Distância, Idade, Time)
+    - Avatar Caching System com Garbage Collection (Prevenção de Memory Leak)
+    - Developer API para injeção de botões customizados (Spectate, Goto, etc)
+    - UI responsiva de painel duplo (Lista + Detalhes)
+    ===========================================================================
+]]
 
+return function(Evok)
+    -- ============================================================================
+    -- DECLARAÇÃO DE SERVIÇOS ROBLOX
+    -- ============================================================================
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
+    local CoreGui = game:GetService("CoreGui")
+    local TextService = game:GetService("TextService")
+    local Workspace = game:GetService("Workspace")
+
+    local LocalPlayer = Players.LocalPlayer
+
+    -- ============================================================================
+    -- INICIALIZAÇÃO DO NAMESPACE DA API
+    -- ============================================================================
+    Evok.PlayerListAPI = {
+        Active = false,
+        Players = {},
+        Cards = {},
+        ActionButtons = {},
+        Connections = {},
+        AvatarCache = {
+            Headshots = {},
+            Busts = {},
+            FullBody = {}
+        },
+        CurrentSort = "Alphabetical",
+        SearchQuery = "",
+        SelectedPlayer = nil,
+        
+        -- Configurações de Performance
+        Config = {
+            UpdateInterval = 0.1, -- Intervalo de atualização de stats
+            EnableAvatarCache = true,
+            GarbageCollectionInterval = 60 -- Limpa cache a cada 60 seg
+        }
+    }
+
+    Evok.WindowFunctions = Evok.WindowFunctions or {}
+
+    -- ============================================================================
+    -- MÓDULO 1: AVATAR CACHING ENGINE & GARBAGE COLLECTION
+    -- ============================================================================
+    
+    --[[
+        Busca a imagem do jogador de forma assíncrona.
+        Se já estiver no cache, retorna instantaneamente.
+    ]]
+    function Evok.PlayerListAPI:FetchAvatar(UserId, ThumbType, ThumbSize, Callback)
+        if not self.Config.EnableAvatarCache then
+            task.spawn(function()
+                local success, content = pcall(function()
+                    return Players:GetUserThumbnailAsync(UserId, ThumbType, ThumbSize)
+                end)
+                Callback(success and content or "rbxassetid://0")
+            end)
+            return
+        end
+
+        local CacheTable = nil
+        
+        if ThumbType == Enum.ThumbnailType.HeadShot then
+            CacheTable = self.AvatarCache.Headshots
+        elseif ThumbType == Enum.ThumbnailType.AvatarBust then
+            CacheTable = self.AvatarCache.Busts
+        elseif ThumbType == Enum.ThumbnailType.AvatarThumbnail then
+            CacheTable = self.AvatarCache.FullBody
+        end
+
+        if CacheTable and CacheTable[UserId] then
+            Callback(CacheTable[UserId])
+            return
+        end
+
+        task.spawn(function()
+            local success, content, isReady = pcall(function()
+                return Players:GetUserThumbnailAsync(UserId, ThumbType, ThumbSize)
+            end)
+
+            if success and isReady and content then
+                if CacheTable then
+                    CacheTable[UserId] = content
+                end
+                Callback(content)
+            else
+                Callback("rbxassetid://0")
+            end
+        end)
+    end
+
+    --[[
+        Limpa avatares de jogadores que já saíram do servidor
+        para prevenir Memory Leaks em sessões longas.
+    ]]
+    function Evok.PlayerListAPI:RunGarbageCollection()
+        local activeIds = {}
+        for _, player in ipairs(Players:GetPlayers()) do
+            activeIds[player.UserId] = true
+        end
+
+        local function CleanTable(cacheTable)
+            for cachedId, _ in pairs(cacheTable) do
+                if not activeIds[cachedId] then
+                    cacheTable[cachedId] = nil
+                end
+            end
+        end
+
+        CleanTable(self.AvatarCache.Headshots)
+        CleanTable(self.AvatarCache.Busts)
+        CleanTable(self.AvatarCache.FullBody)
+    end
+
+    -- Loop de Garbage Collection
+    task.spawn(function()
+        while true do
+            task.wait(Evok.PlayerListAPI.Config.GarbageCollectionInterval)
+            if Evok.PlayerListAPI.Active then
+                Evok.PlayerListAPI:RunGarbageCollection()
+            end
+        end
+    end)
+
+    -- ============================================================================
+    -- MÓDULO 2: ADVANCED SORTING & FILTERING ENGINE
+    -- ============================================================================
+    
+    --[[
+        Algoritmo Fuzzy Match para buscar jogadores digitando apenas 
+        partes do nome, ignorando letras maiúsculas/minúsculas.
+    ]]
+    function Evok.PlayerListAPI:FuzzyMatch(str, pattern)
+        if pattern == "" or not pattern then return true end
+        if not str then return false end
+        
+        str = string.lower(str)
+        pattern = string.lower(pattern)
+        
+        local pIndex = 1
+        for sIndex = 1, #str do
+            if string.sub(str, sIndex, sIndex) == string.sub(pattern, pIndex, pIndex) then
+                pIndex = pIndex + 1
+                if pIndex > #pattern then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    --[[
+        Funções de cálculo auxiliares para ordenação
+    ]]
+    function Evok.PlayerListAPI:GetPlayerDistance(TargetPlayer)
+        if not TargetPlayer or not TargetPlayer.Character then return math.huge end
+        if not LocalPlayer.Character then return math.huge end
+        
+        local tRoot = TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local lRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        
+        if tRoot and lRoot then
+            return (tRoot.Position - lRoot.Position).Magnitude
+        end
+        return math.huge
+    end
+
+    function Evok.PlayerListAPI:GetPlayerHealth(TargetPlayer)
+        if not TargetPlayer or not TargetPlayer.Character then return 0 end
+        local hum = TargetPlayer.Character:FindFirstChild("Humanoid")
+        if hum then
+            return hum.Health
+        end
+        return 0
+    end
+
+    --[[
+        Motor de Ordenação Principal
+    ]]
+    function Evok.PlayerListAPI:SortPlayers(PlayerA, PlayerB)
+        local sortType = self.CurrentSort
+
+        if sortType == "Alphabetical" then
+            return string.lower(PlayerA.DisplayName) < string.lower(PlayerB.DisplayName)
+            
+        elseif sortType == "UserId" then
+            return PlayerA.UserId < PlayerB.UserId
+            
+        elseif sortType == "AccountAge" then
+            -- Menos dias = conta mais nova
+            return PlayerA.AccountAge < PlayerB.AccountAge
+            
+        elseif sortType == "Distance" then
+            local distA = self:GetPlayerDistance(PlayerA)
+            local distB = self:GetPlayerDistance(PlayerB)
+            return distA < distB
+            
+        elseif sortType == "Health" then
+            local hpA = self:GetPlayerHealth(PlayerA)
+            local hpB = self:GetPlayerHealth(PlayerB)
+            return hpA > hpB -- Maior vida primeiro
+            
+        elseif sortType == "Team" then
+            local teamA = PlayerA.Team and PlayerA.Team.Name or "Neutral"
+            local teamB = PlayerB.Team and PlayerB.Team.Name or "Neutral"
+            
+            if teamA == teamB then
+                return string.lower(PlayerA.DisplayName) < string.lower(PlayerB.DisplayName)
+            end
+            return teamA < teamB
+        end
+        
+        -- Fallback
+        return PlayerA.Name < PlayerB.Name
+    end
+
+    --[[
+        Retorna a lista de jogadores já filtrada pela barra de pesquisa
+        e ordenada pelo algoritmo escolhido.
+    ]]
+    function Evok.PlayerListAPI:GetFilteredAndSortedPlayers()
+        local result = {}
+        
+        for _, player in ipairs(Players:GetPlayers()) do
+            local matchesSearch = false
+            
+            if self.SearchQuery == "" then
+                matchesSearch = true
+            else
+                -- Tenta match no DisplayName ou Username
+                local matchDisplay = self:FuzzyMatch(player.DisplayName, self.SearchQuery)
+                local matchUser = self:FuzzyMatch(player.Name, self.SearchQuery)
+                
+                if matchDisplay or matchUser then
+                    matchesSearch = true
+                end
+            end
+
+            if matchesSearch then
+                table.insert(result, player)
+            end
+        end
+
+        table.sort(result, function(a, b)
+            return self:SortPlayers(a, b)
+        end)
+
+        return result
+    end
+
+    -- ============================================================================
+    -- MÓDULO 3: DEVELOPER ACTION API
+    -- ============================================================================
+    
+    --[[
+        Permite ao desenvolvedor injetar botões dinâmicos no perfil do jogador.
+        Exemplo: Evok.PlayerListAPI:RegisterAction("Goto", function(plr) ... end)
+    ]]
+    function Evok.PlayerListAPI:RegisterAction(ActionName, ActionCallback)
+        table.insert(self.ActionButtons, {
+            Name = ActionName,
+            Callback = ActionCallback,
+            Id = HttpService:GenerateGUID(false)
+        })
+    end
+
+    function Evok.PlayerListAPI:ClearActions()
+        self.ActionButtons = {}
+    end
+
+    function Evok.PlayerListAPI:RemoveAction(ActionName)
+        for i, action in ipairs(self.ActionButtons) do
+            if action.Name == ActionName then
+                table.remove(self.ActionButtons, i)
+                break
+            end
+        end
+    end
+
+    -- ============================================================================
+    -- MÓDULO 4: UI BUILDER - FRAMEWORK VISUAL
+    -- ============================================================================
+    
+    function Evok.WindowFunctions:BuildPlayerList()
+        local Window = self
+        
+        -- Criação da Aba principal
+        local PlayerTab = Window:CreateTab("Player List", Evok.Icons.Tabs.PlayerList)
+        Evok.PlayerListAPI.Active = true
+
+        -- ==========================================
+        -- CONTAINER PRINCIPAL DA ABA
+        -- ==========================================
+        local MainContainer = Evok.Utility.Instance:Create("Frame", {
+            Name = "PlayerList_EngineContainer",
+            Parent = PlayerTab.PageObj or PlayerTab.Page,
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ZIndex = 1
+        })
+
+        -- Ajuste de Layout Nativo (Remove padding padrão da Tab)
+        if MainContainer.Parent and MainContainer.Parent:FindFirstChild("UIListLayout") then
+            MainContainer.Parent.UIListLayout.Padding = UDim.new(0, 0)
+        end
+
+        -- ==========================================
+        -- PAINEL ESQUERDO (Lista de Jogadores)
+        -- ==========================================
+        local LeftPanel = Evok.Utility.Instance:Create("Frame", {
+            Name = "Panel_Left_List",
+            Parent = MainContainer,
+            Size = UDim2.new(0.5, -5, 1, 0),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Container"),
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            ZIndex = 2
+        })
+        
+        Evok.Utility.Instance:CreateRound(6).Parent = LeftPanel
+        Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Border"), 1).Parent = LeftPanel
+
+        -- Header do Painel Esquerdo
+        local ListHeader = Evok.Utility.Instance:Create("Frame", {
+            Name = "ListHeader",
+            Parent = LeftPanel,
+            Size = UDim2.new(1, 0, 0, 50),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Background"),
+            BorderSizePixel = 0,
+            ZIndex = 3
+        })
+        Evok.Utility.Instance:CreateRound(6).Parent = ListHeader
+        
+        -- Fix para a borda inferior arredondada do Header (Quadrado sólido em baixo)
+        Evok.Utility.Instance:Create("Frame", {
+            Name = "CornerBlockerBottom",
+            Parent = ListHeader,
+            Size = UDim2.new(1, 0, 0, 10),
+            Position = UDim2.new(0, 0, 1, -10),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Background"),
+            BorderSizePixel = 0,
+            ZIndex = 3
+        })
+        
+        -- Linha Divisória
+        Evok.Utility.Instance:Create("Frame", {
+            Name = "SeparatorLine",
+            Parent = ListHeader,
+            Size = UDim2.new(1, 0, 0, 1),
+            Position = UDim2.new(0, 0, 1, -1),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Border"),
+            BorderSizePixel = 0,
+            ZIndex = 4
+        })
+
+        -- Caixa de Pesquisa
+        local SearchInputContainer = Evok.Utility.Instance:Create("Frame", {
+            Name = "SearchBoxContainer",
+            Parent = ListHeader,
+            Size = UDim2.new(1, -20, 0, 30),
+            Position = UDim2.new(0, 10, 0, 10),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("ContainerHover"),
+            BorderSizePixel = 0,
+            ZIndex = 5
+        })
+        
+        Evok.Utility.Instance:CreateRound(4).Parent = SearchInputContainer
+        Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("BorderHighlight"), 1).Parent = SearchInputContainer
+
+        local SearchIcon = Evok.Utility.Instance:Create("ImageLabel", {
+            Name = "SearchIcon",
+            Parent = SearchInputContainer,
+            Size = UDim2.new(0, 16, 0, 16),
+            Position = UDim2.new(0, 8, 0.5, -8),
+            BackgroundTransparency = 1,
+            Image = Evok.Icons.Widgets.Search or "rbxassetid://10057377502",
+            ImageColor3 = Evok.ThemeManager:GetColor("TextDark"),
+            ZIndex = 6
+        })
+
+        local SearchTextBox = Evok.Utility.Instance:Create("TextBox", {
+            Name = "SearchInput",
+            Parent = SearchInputContainer,
+            Size = UDim2.new(1, -35, 1, 0),
+            Position = UDim2.new(0, 30, 0, 0),
+            BackgroundTransparency = 1,
+            PlaceholderText = "Search username...",
+            PlaceholderColor3 = Evok.ThemeManager:GetColor("TextDark"),
+            TextColor3 = Evok.ThemeManager:GetColor("Text"),
+            Font = Evok.Fonts.Main,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ClearTextOnFocus = false,
+            ZIndex = 6
+        })
+
+        -- Área de Rolagem da Lista
+        local PlayerScrollArea = Evok.Utility.Instance:Create("ScrollingFrame", {
+            Name = "PlayerScrollArea",
+            Parent = LeftPanel,
+            Size = UDim2.new(1, 0, 1, -50),
+            Position = UDim2.new(0, 0, 0, 50),
+            BackgroundTransparency = 1,
+            ScrollBarThickness = 3,
+            ScrollBarImageColor3 = Evok.ThemeManager:GetColor("Accent"),
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            BorderSizePixel = 0,
+            ZIndex = 3
+        })
+
+        local ScrollPadding = Evok.Utility.Instance:Create("UIPadding", {
+            Parent = PlayerScrollArea,
+            PaddingLeft = UDim.new(0, 8),
+            PaddingRight = UDim.new(0, 8),
+            PaddingTop = UDim.new(0, 10),
+            PaddingBottom = UDim.new(0, 10)
+        })
+
+        local ScrollLayout = Evok.Utility.Instance:Create("UIListLayout", {
+            Parent = PlayerScrollArea,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 6)
+        })
+
+        -- ==========================================
+        -- PAINEL DIREITO (Detalhes do Jogador)
+        -- ==========================================
+        local RightPanel = Evok.Utility.Instance:Create("Frame", {
+            Name = "Panel_Right_Details",
+            Parent = MainContainer,
+            Size = UDim2.new(0.5, -5, 1, 0),
+            Position = UDim2.new(0.5, 5, 0, 0),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Container"),
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            ZIndex = 2
+        })
+        
+        Evok.Utility.Instance:CreateRound(6).Parent = RightPanel
+        Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Border"), 1).Parent = RightPanel
+
+        -- Placeholder (Estado Vazio)
+        local DetailsPlaceholder = Evok.Utility.Instance:Create("TextLabel", {
+            Name = "EmptyStateText",
+            Parent = RightPanel,
+            Size = UDim2.new(1, 0, 1, 0),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1,
+            Text = "Select a player\nto view details",
+            TextColor3 = Evok.ThemeManager:GetColor("TextDark"),
+            Font = Evok.Fonts.Semibold,
+            TextSize = 14,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            Visible = true,
+            ZIndex = 3
+        })
+
+        -- Container Principal de Detalhes
+        local DetailsContent = Evok.Utility.Instance:Create("Frame", {
+            Name = "DetailsContentContainer",
+            Parent = RightPanel,
+            Size = UDim2.new(1, 0, 1, 0),
+            Position = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1,
+            Visible = false,
+            ZIndex = 3
+        })
+
+        -- Avatar Grande do Jogador
+        local DetailsAvatar = Evok.Utility.Instance:Create("ImageLabel", {
+            Name = "AvatarFullBody",
+            Parent = DetailsContent,
+            Size = UDim2.new(0, 130, 0, 130),
+            Position = UDim2.new(0.5, -65, 0, 20),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Background"),
+            BorderSizePixel = 0,
+            Image = "",
+            ZIndex = 4
+        })
+        
+        Evok.Utility.Instance:CreateRound(8).Parent = DetailsAvatar
+        Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("BorderHighlight"), 1).Parent = DetailsAvatar
+
+        -- Textos de Nome
+        local DetailsDisplayName = Evok.Utility.Instance:Create("TextLabel", {
+            Name = "Label_DisplayName",
+            Parent = DetailsContent,
+            Size = UDim2.new(1, -20, 0, 25),
+            Position = UDim2.new(0, 10, 0, 160),
+            BackgroundTransparency = 1,
+            Text = "Player DisplayName",
+            TextColor3 = Evok.ThemeManager:GetColor("Text"),
+            Font = Evok.Fonts.Bold,
+            TextSize = 18,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 4
+        })
+
+        local DetailsUsername = Evok.Utility.Instance:Create("TextLabel", {
+            Name = "Label_Username",
+            Parent = DetailsContent,
+            Size = UDim2.new(1, -20, 0, 15),
+            Position = UDim2.new(0, 10, 0, 185),
+            BackgroundTransparency = 1,
+            Text = "@username",
+            TextColor3 = Evok.ThemeManager:GetColor("TextDark"),
+            Font = Evok.Fonts.Main,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 4
+        })
+
+        -- Linha Divisória de Informações
+        local DetailsDivider = Evok.Utility.Instance:Create("Frame", {
+            Name = "InfoDivider",
+            Parent = DetailsContent,
+            Size = UDim2.new(1, -40, 0, 1),
+            Position = UDim2.new(0, 20, 0, 215),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Border"),
+            BorderSizePixel = 0,
+            ZIndex = 4
+        })
+
+        -- ==========================================
+        -- GRID DE ESTATÍSTICAS (Status do Jogador)
+        -- ==========================================
+        local StatsGridContainer = Evok.Utility.Instance:Create("Frame", {
+            Name = "StatsGrid",
+            Parent = DetailsContent,
+            Size = UDim2.new(1, -20, 0, 70),
+            Position = UDim2.new(0, 10, 0, 225),
+            BackgroundTransparency = 1,
+            ZIndex = 4
+        })
+        
+        local StatsGridLayout = Evok.Utility.Instance:Create("UIGridLayout", {
+            Parent = StatsGridContainer,
+            CellSize = UDim2.new(0.5, -5, 0, 25),
+            CellPadding = UDim2.new(0, 10, 0, 10),
+            SortOrder = Enum.SortOrder.LayoutOrder
+        })
+
+        -- Construtor Auxiliar para as Células da Grid
+        local function CreateStatCell(TitleText, DefaultValue)
+            local CellContainer = Evok.Utility.Instance:Create("Frame", {
+                Name = "StatCell_" .. TitleText,
+                Parent = StatsGridContainer,
+                BackgroundTransparency = 1,
+                ZIndex = 5
+            })
+            
+            Evok.Utility.Instance:Create("TextLabel", {
+                Name = "StatTitle",
+                Parent = CellContainer,
+                Size = UDim2.new(0.4, 0, 1, 0),
+                Position = UDim2.new(0, 0, 0, 0),
+                BackgroundTransparency = 1,
+                Text = TitleText .. ":",
+                TextColor3 = Evok.ThemeManager:GetColor("TextDark"),
+                Font = Evok.Fonts.Main,
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 6
+            })
+            
+            local ValueLabel = Evok.Utility.Instance:Create("TextLabel", {
+                Name = "StatValue",
+                Parent = CellContainer,
+                Size = UDim2.new(0.6, 0, 1, 0),
+                Position = UDim2.new(0.4, 0, 0, 0),
+                BackgroundTransparency = 1,
+                Text = DefaultValue,
+                TextColor3 = Evok.ThemeManager:GetColor("Text"),
+                Font = Evok.Fonts.Semibold,
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                ZIndex = 6
+            })
+            
+            return ValueLabel
+        end
+
+        local StatUserIDLabel = CreateStatCell("User ID", "0")
+        local StatAgeLabel = CreateStatCell("Account", "0 Days")
+        local StatHealthLabel = CreateStatCell("Health", "100/100")
+        local StatDistanceLabel = CreateStatCell("Distance", "0 studs")
+
+        -- ==========================================
+        -- ÁREA DE AÇÕES (Botões do Desenvolvedor)
+        -- ==========================================
+        local ActionsScrollArea = Evok.Utility.Instance:Create("ScrollingFrame", {
+            Name = "DeveloperActionsScroll",
+            Parent = DetailsContent,
+            Size = UDim2.new(1, -20, 1, -305),
+            Position = UDim2.new(0, 10, 0, 295),
+            BackgroundTransparency = 1,
+            ScrollBarThickness = 2,
+            ScrollBarImageColor3 = Evok.ThemeManager:GetColor("Accent"),
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            BorderSizePixel = 0,
+            ZIndex = 4
+        })
+
+        local ActionsListLayout = Evok.Utility.Instance:Create("UIListLayout", {
+            Parent = ActionsScrollArea,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 6)
+        })
+
+        -- ============================================================================
+        -- MÓDULO 5: INSTANCIAÇÃO DE CARTAS E ATUALIZAÇÃO
+        -- ============================================================================
+
+        local function RefreshDeveloperButtons()
+            -- Limpar botões antigos
+            for _, child in ipairs(ActionsScrollArea:GetChildren()) do
+                if child:IsA("GuiObject") then child:Destroy() end
+            end
+
+            -- Instanciar botões registrados pela API
+            for _, actionData in ipairs(Evok.PlayerListAPI.ActionButtons) do
+                local ActionBtn = Evok.Utility.Instance:Create("TextButton", {
+                    Name = "ActionBtn_" .. actionData.Name,
+                    Parent = ActionsScrollArea,
+                    Size = UDim2.new(1, -10, 0, 32),
+                    Position = UDim2.new(0, 0, 0, 0),
+                    BackgroundColor3 = Evok.ThemeManager:GetColor("Background"),
+                    Text = actionData.Name,
+                    TextColor3 = Evok.ThemeManager:GetColor("Text"),
+                    Font = Evok.Fonts.Semibold,
+                    TextSize = 13,
+                    AutoButtonColor = false,
+                    ZIndex = 5
+                })
+                
+                Evok.Utility.Instance:CreateRound(4).Parent = ActionBtn
+                local BtnStroke = Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Border"), 1)
+                BtnStroke.Parent = ActionBtn
+
+                -- Eventos de Mouse do Botão
+                ActionBtn.MouseEnter:Connect(function()
+                    TweenService:Create(ActionBtn, TweenInfo.new(0.2), {
+                        BackgroundColor3 = Evok.ThemeManager:GetColor("ContainerHover")
+                    }):Play()
+                    TweenService:Create(BtnStroke, TweenInfo.new(0.2), {
+                        Color = Evok.ThemeManager:GetColor("Accent")
+                    }):Play()
+                end)
+                
+                ActionBtn.MouseLeave:Connect(function()
+                    TweenService:Create(ActionBtn, TweenInfo.new(0.2), {
+                        BackgroundColor3 = Evok.ThemeManager:GetColor("Background")
+                    }):Play()
+                    TweenService:Create(BtnStroke, TweenInfo.new(0.2), {
+                        Color = Evok.ThemeManager:GetColor("Border")
+                    }):Play()
+                end)
+                
+                ActionBtn.MouseButton1Click:Connect(function()
+                    -- Efeito de clique (Ripple simulado)
+                    TweenService:Create(ActionBtn, TweenInfo.new(0.1), {
+                        Size = UDim2.new(0.95, 0, 0, 30)
+                    }):Play()
+                    
+                    task.delay(0.1, function()
+                        TweenService:Create(ActionBtn, TweenInfo.new(0.1), {
+                            Size = UDim2.new(1, -10, 0, 32)
+                        }):Play()
+                    end)
+                    
+                    -- Dispara o callback do dev passando o jogador selecionado
+                    if Evok.PlayerListAPI.SelectedPlayer then
+                        task.spawn(actionData.Callback, Evok.PlayerListAPI.SelectedPlayer)
+                    end
+                end)
+            end
+            
+            -- Atualiza o Scroll
+            ActionsScrollArea.CanvasSize = UDim2.new(0, 0, 0, #Evok.PlayerListAPI.ActionButtons * 38)
+        end
+
+        local function SetSelectedPlayer(PlayerObj)
+            Evok.PlayerListAPI.SelectedPlayer = PlayerObj
+            
+            if not PlayerObj then
+                DetailsContent.Visible = false
+                DetailsPlaceholder.Visible = true
+                return
+            end
+
+            DetailsPlaceholder.Visible = false
+            DetailsContent.Visible = true
+
+            -- Atualização de Textos
+            DetailsDisplayName.Text = PlayerObj.DisplayName
+            DetailsUsername.Text = "@" .. PlayerObj.Name
+            StatUserIDLabel.Text = tostring(PlayerObj.UserId)
+            StatAgeLabel.Text = tostring(PlayerObj.AccountAge) .. " D"
+
+            -- Request da Imagem Full Body
+            DetailsAvatar.Image = ""
+            Evok.PlayerListAPI:FetchAvatar(PlayerObj.UserId, Enum.ThumbnailType.AvatarThumbnail, Enum.ThumbnailSize.Size150x150, function(ImageUrl)
+                -- Verifica se o jogador selecionado ainda é o mesmo após o yield
+                if Evok.PlayerListAPI.SelectedPlayer == PlayerObj then
+                    DetailsAvatar.Image = ImageUrl
+                end
+            end)
+
+            -- Constroi botões na hora
+            RefreshDeveloperButtons()
+        end
+
+        local function RenderPlayerList()
+            -- Limpar lista antiga
+            for _, child in ipairs(PlayerScrollArea:GetChildren()) do
+                if child:IsA("GuiObject") then child:Destroy() end
+            end
+
+            local SortedPlayers = Evok.PlayerListAPI:GetFilteredAndSortedPlayers()
+            
+            for index, player in ipairs(SortedPlayers) do
+                local Card = Evok.Utility.Instance:Create("TextButton", {
+                    Name = "Card_" .. player.Name,
+                    Parent = PlayerScrollArea,
+                    Size = UDim2.new(1, 0, 0, 50),
+                    Position = UDim2.new(0, 0, 0, 0),
+                    BackgroundColor3 = Evok.ThemeManager:GetColor("Background"),
+                    Text = "",
+                    AutoButtonColor = false,
+                    ZIndex = 4
+                })
+                
+                Evok.Utility.Instance:CreateRound(6).Parent = Card
+                local CardStroke = Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Border"), 1)
+                CardStroke.Parent = Card
+
+                -- Avatar Thumbnail (Headshot)
+                local HeadshotImage = Evok.Utility.Instance:Create("ImageLabel", {
+                    Name = "Headshot",
+                    Parent = Card,
+                    Size = UDim2.new(0, 36, 0, 36),
+                    Position = UDim2.new(0, 7, 0.5, -18),
+                    BackgroundColor3 = Evok.ThemeManager:GetColor("ContainerHover"),
+                    Image = "",
+                    ZIndex = 5
+                })
+                Evok.Utility.Instance:CreateRound(100).Parent = HeadshotImage
+                
+                Evok.PlayerListAPI:FetchAvatar(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48, function(ImageUrl)
+                    if Card.Parent then HeadshotImage.Image = ImageUrl end
+                end)
+
+                -- Textos do Cartão
+                Evok.Utility.Instance:Create("TextLabel", {
+                    Name = "NameDisplay",
+                    Parent = Card,
+                    Size = UDim2.new(1, -60, 0, 18),
+                    Position = UDim2.new(0, 50, 0, 8),
+                    BackgroundTransparency = 1,
+                    Text = player.DisplayName,
+                    TextColor3 = Evok.ThemeManager:GetColor("Text"),
+                    Font = Evok.Fonts.Semibold,
+                    TextSize = 14,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    ZIndex = 5
+                })
+
+                Evok.Utility.Instance:Create("TextLabel", {
+                    Name = "NameUser",
+                    Parent = Card,
+                    Size = UDim2.new(1, -60, 0, 14),
+                    Position = UDim2.new(0, 50, 0, 28),
+                    BackgroundTransparency = 1,
+                    Text = "@" .. player.Name,
+                    TextColor3 = Evok.ThemeManager:GetColor("TextDark"),
+                    Font = Evok.Fonts.Main,
+                    TextSize = 12,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    ZIndex = 5
+                })
+
+                -- Indicação Visual se for o selecionado atual
+                if Evok.PlayerListAPI.SelectedPlayer == player then
+                    CardStroke.Color = Evok.ThemeManager:GetColor("Accent")
+                end
+
+                -- Eventos do Cartão
+                Card.MouseEnter:Connect(function()
+                    if Evok.PlayerListAPI.SelectedPlayer ~= player then
+                        TweenService:Create(CardStroke, TweenInfo.new(0.2), {Color = Evok.ThemeManager:GetColor("BorderHighlight")}):Play()
+                    end
+                end)
+                
+                Card.MouseLeave:Connect(function()
+                    if Evok.PlayerListAPI.SelectedPlayer ~= player then
+                        TweenService:Create(CardStroke, TweenInfo.new(0.2), {Color = Evok.ThemeManager:GetColor("Border")}):Play()
+                    end
+                end)
+
+                Card.MouseButton1Click:Connect(function()
+                    SetSelectedPlayer(player)
+                    RenderPlayerList() -- Atualiza a lista para refletir a borda colorida no novo alvo
+                end)
+            end
+
+            PlayerScrollArea.CanvasSize = UDim2.new(0, 0, 0, #SortedPlayers * 56)
+        end
+
+        -- ============================================================================
+        -- MÓDULO 6: CORE EVENT LOOPS E CONEXÕES
+        -- ============================================================================
+        
+        -- Evento da Caixa de Pesquisa
+        SearchTextBox.Changed:Connect(function(Property)
+            if Property == "Text" then
+                Evok.PlayerListAPI.SearchQuery = SearchTextBox.Text
+                RenderPlayerList()
+            end
+        end)
+
+        -- Eventos de Conexão Roblox
+        local ConnectionAdded = Players.PlayerAdded:Connect(function()
+            RenderPlayerList()
+        end)
+        
+        local ConnectionRemoved = Players.PlayerRemoving:Connect(function(LeftPlayer)
+            if Evok.PlayerListAPI.SelectedPlayer == LeftPlayer then
+                SetSelectedPlayer(nil)
+            end
+            RenderPlayerList()
+        end)
+
+        table.insert(Evok.PlayerListAPI.Connections, ConnectionAdded)
+        table.insert(Evok.PlayerListAPI.Connections, ConnectionRemoved)
+
+        -- Loop de Atualização Dinâmica (Vida e Distância)
+        -- Usando Heartbeat para não travar a renderização visual do jogo
+        local StatusLoop = RunService.Heartbeat:Connect(function()
+            if not Evok.PlayerListAPI.Active then return end
+            
+            local Target = Evok.PlayerListAPI.SelectedPlayer
+            if not Target then return end
+            
+            local TargetChar = Target.Character
+            
+            -- Calculando a Vida Atualizada
+            if TargetChar and TargetChar:FindFirstChild("Humanoid") then
+                local Hum = TargetChar.Humanoid
+                local HpStr = tostring(math.floor(Hum.Health)) .. " / " .. tostring(math.floor(Hum.MaxHealth))
+                StatHealthLabel.Text = HpStr
+            else
+                StatHealthLabel.Text = "N/A"
+            end
+
+            -- Calculando a Distância Atualizada
+            local LChar = LocalPlayer.Character
+            if TargetChar and LChar and TargetChar:FindFirstChild("HumanoidRootPart") and LChar:FindFirstChild("HumanoidRootPart") then
+                local Dist = math.floor((TargetChar.HumanoidRootPart.Position - LChar.HumanoidRootPart.Position).Magnitude)
+                StatDistanceLabel.Text = tostring(Dist) .. " studs"
+            else
+                StatDistanceLabel.Text = "N/A"
+            end
+        end)
+        
+        table.insert(Evok.PlayerListAPI.Connections, StatusLoop)
+
+        -- Renderização Inicial
+        RenderPlayerList()
+    end
+
+    -- ============================================================================
+    -- FIM DO ARQUIVO SYSTEM.LUA
+    -- ============================================================================
+end
