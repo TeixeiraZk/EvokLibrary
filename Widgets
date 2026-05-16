@@ -1,0 +1,792 @@
+-- começo da parte 2
+
+--[[
+    ===========================================================================
+    EVOK UI LIBRARY - PARTE 2: WIDGETS & TAB NAVIGATION ENGINE
+    ===========================================================================
+    Depende da Parte 1 (Core, ThemeManager, Utility).
+    Adiciona: Tooltips, Tabs, Sections, Labels, Buttons, Toggles, Sliders.
+    ===========================================================================
+]]
+
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local TextService = game:GetService("TextService")
+local CoreGui = game:GetService("CoreGui")
+
+-- Resgatando funções e namespaces da Parte 1 (Contextual)
+-- Em um ambiente real, 'Evok' já estaria no escopo ou seria retornado pelo require.
+-- Estamos injetando essas funções diretamente na tabela 'Window' e 'Tab'.
+
+-- ============================================================================
+-- 1. GLOBAL TOOLTIP SYSTEM (Motor de Dicas Visuais)
+-- ============================================================================
+local TooltipGui = Instance.new("ScreenGui")
+TooltipGui.Name = "Evok_Tooltip_Layer"
+TooltipGui.Parent = CoreGui
+TooltipGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+
+local TooltipFrame = Instance.new("Frame")
+TooltipFrame.Name = "Tooltip"
+TooltipFrame.Parent = TooltipGui
+TooltipFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18) -- Evok.ThemeManager:GetColor("ContainerHover")
+TooltipFrame.Size = UDim2.new(0, 0, 0, 24)
+TooltipFrame.Position = UDim2.new(0, 0, 0, 0)
+TooltipFrame.Visible = false
+TooltipFrame.ZIndex = 100
+
+local TooltipCorner = Instance.new("UICorner")
+TooltipCorner.CornerRadius = UDim.new(0, 4)
+TooltipCorner.Parent = TooltipFrame
+
+local TooltipStroke = Instance.new("UIStroke")
+TooltipStroke.Color = Color3.fromRGB(45, 45, 50) -- Evok.ThemeManager:GetColor("BorderHighlight")
+TooltipStroke.Parent = TooltipFrame
+
+local TooltipPadding = Instance.new("UIPadding")
+TooltipPadding.PaddingLeft = UDim.new(0, 8)
+TooltipPadding.PaddingRight = UDim.new(0, 8)
+TooltipPadding.Parent = TooltipFrame
+
+local TooltipText = Instance.new("TextLabel")
+TooltipText.Parent = TooltipFrame
+TooltipText.BackgroundTransparency = 1
+TooltipText.Size = UDim2.new(1, 0, 1, 0)
+TooltipText.Font = Enum.Font.Gotham
+TooltipText.TextSize = 12
+TooltipText.TextColor3 = Color3.fromRGB(200, 200, 200)
+TooltipText.TextXAlignment = Enum.TextXAlignment.Center
+
+local function ShowTooltip(text)
+    if not text or text == "" then return end
+    local textBounds = TextService:GetTextSize(text, 12, Enum.Font.Gotham, Vector2.new(math.huge, 24))
+    TooltipFrame.Size = UDim2.new(0, textBounds.X + 16, 0, 24)
+    TooltipText.Text = text
+    TooltipFrame.Visible = true
+    
+    local mousePos = UserInputService:GetMouseLocation()
+    TooltipFrame.Position = UDim2.new(0, mousePos.X + 15, 0, mousePos.Y + 15)
+end
+
+local function HideTooltip()
+    TooltipFrame.Visible = false
+end
+
+UserInputService.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement and TooltipFrame.Visible then
+        local mousePos = UserInputService:GetMouseLocation()
+        -- Tween rápido para o tooltip seguir o mouse suavemente
+        TweenService:Create(TooltipFrame, TweenInfo.new(0.05, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+            Position = UDim2.new(0, mousePos.X + 15, 0, mousePos.Y + 15)
+        }):Play()
+    end
+end)
+
+-- Adiciona a injeção ao Core da Janela (Assumindo que 'Evok' seja acessível)
+function Evok:AttachTooltip(element, text)
+    element.MouseEnter:Connect(function() ShowTooltip(text) end)
+    element.MouseLeave:Connect(HideTooltip)
+    element.SelectionLost:Connect(HideTooltip)
+end
+
+-- ============================================================================
+-- 2. TAB SYSTEM (Navegação Horizontal Avançada)
+-- ============================================================================
+function Evok.WindowFunctions:CreateTab(TabName, IconId)
+    local Tab = {
+        Name = TabName,
+        Elements = {},
+        LeftColumn = nil,
+        RightColumn = nil
+    }
+
+    local Window = self -- Referência à instância Window
+    
+    -- [ BOTAO DA TAB ]
+    local TabButton = Evok.Utility.Instance:Create("TextButton", {
+        Name = "Tab_" .. TabName,
+        Parent = Window.Navigation, -- Vem da Parte 1
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundTransparency = 1,
+        Text = "",
+        AutoButtonColor = false
+    })
+
+    local TabPadding = Evok.Utility.Instance:Create("UIPadding", {
+        Parent = TabButton,
+        PaddingLeft = UDim.new(0, 12),
+        PaddingRight = UDim.new(0, 12)
+    })
+
+    local LayoutGroup = Evok.Utility.Instance:Create("Frame", {
+        Name = "Layout",
+        Parent = TabButton,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1
+    })
+
+    local TabUIList = Evok.Utility.Instance:Create("UIListLayout", {
+        Parent = LayoutGroup,
+        FillDirection = Enum.FillDirection.Horizontal,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+        Padding = UDim.new(0, 6)
+    })
+
+    if IconId then
+        local TabIcon = Evok.Utility.Instance:Create("ImageLabel", {
+            Name = "Icon",
+            Parent = LayoutGroup,
+            Size = UDim2.new(0, 16, 0, 16),
+            BackgroundTransparency = 1,
+            Image = IconId,
+            ImageColor3 = Evok.ThemeManager:GetColor("TextDark")
+        })
+        Tab.IconObj = TabIcon
+    end
+
+    local TabLabel = Evok.Utility.Instance:Create("TextLabel", {
+        Name = "Title",
+        Parent = LayoutGroup,
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundTransparency = 1,
+        Text = TabName,
+        TextColor3 = Evok.ThemeManager:GetColor("TextDark"),
+        Font = Evok.Fonts.Semibold,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Center
+    })
+    Tab.LabelObj = TabLabel
+
+    -- Indicador inferior (Highlight Line)
+    local Highlight = Evok.Utility.Instance:Create("Frame", {
+        Name = "Highlight",
+        Parent = TabButton,
+        Size = UDim2.new(0, 0, 0, 2), -- Inicia com tamanho 0
+        Position = UDim2.new(0.5, 0, 1, -2),
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundColor3 = Evok.ThemeManager:GetColor("Accent"),
+        BorderSizePixel = 0
+    })
+    Tab.HighlightObj = Highlight
+
+    -- [ PÁGINA (CONTEÚDO DA TAB) ]
+    local Page = Evok.Utility.Instance:Create("ScrollingFrame", {
+        Name = "Page_" .. TabName,
+        Parent = Window.Pages, -- Vem da Parte 1
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        ScrollBarThickness = 0,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        Visible = false
+    })
+    Tab.PageObj = Page
+
+    local PagePadding = Evok.Utility.Instance:Create("UIPadding", {
+        Parent = Page,
+        PaddingLeft = UDim.new(0, 5),
+        PaddingRight = UDim.new(0, 5),
+        PaddingTop = UDim.new(0, 5),
+        PaddingBottom = UDim.new(0, 5)
+    })
+
+    -- Layout em duas colunas (Padrão de UI Library Profissional)
+    local ColumnsLayout = Evok.Utility.Instance:Create("UIListLayout", {
+        Parent = Page,
+        FillDirection = Enum.FillDirection.Horizontal,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 10)
+    })
+
+    local LeftColumn = Evok.Utility.Instance:Create("Frame", {
+        Name = "LeftColumn",
+        Parent = Page,
+        Size = UDim2.new(0.5, -5, 1, 0),
+        BackgroundTransparency = 1
+    })
+
+    local RightColumn = Evok.Utility.Instance:Create("Frame", {
+        Name = "RightColumn",
+        Parent = Page,
+        Size = UDim2.new(0.5, -5, 1, 0),
+        BackgroundTransparency = 1
+    })
+
+    Evok.Utility.Instance:Create("UIListLayout", {
+        Parent = LeftColumn,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 8)
+    })
+
+    Evok.Utility.Instance:Create("UIListLayout", {
+        Parent = RightColumn,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 8)
+    })
+
+    Tab.LeftColumn = LeftColumn
+    Tab.RightColumn = RightColumn
+
+    -- Atualizador de CanvasSize dinâmico
+    local function UpdateCanvas()
+        local leftSize = 0
+        local rightSize = 0
+        
+        for _, child in ipairs(LeftColumn:GetChildren()) do
+            if child:IsA("GuiObject") then leftSize = leftSize + child.AbsoluteSize.Y + 8 end
+        end
+        for _, child in ipairs(RightColumn:GetChildren()) do
+            if child:IsA("GuiObject") then rightSize = rightSize + child.AbsoluteSize.Y + 8 end
+        end
+        
+        local maxSize = math.max(leftSize, rightSize)
+        Page.CanvasSize = UDim2.new(0, 0, 0, maxSize + 15)
+    end
+
+    LeftColumn.ChildAdded:Connect(UpdateCanvas)
+    RightColumn.ChildAdded:Connect(UpdateCanvas)
+
+    -- [ LÓGICA DE SELEÇÃO DE TAB ]
+    TabButton.MouseButton1Click:Connect(function()
+        if Window.ActiveTab == TabName then return end
+
+        for _, t in pairs(Window.Tabs) do
+            t.PageObj.Visible = false
+            TweenService:Create(t.LabelObj, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {TextColor3 = Evok.ThemeManager:GetColor("TextDark")}):Play()
+            if t.IconObj then
+                TweenService:Create(t.IconObj, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {ImageColor3 = Evok.ThemeManager:GetColor("TextDark")}):Play()
+            end
+            TweenService:Create(t.HighlightObj, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(0, 0, 0, 2)}):Play()
+        end
+
+        Page.Visible = true
+        Page.Position = UDim2.new(0, 0, 0, 15)
+        Page.GroupTransparency = 1
+        
+        -- Animação de entrada da página
+        TweenService:Create(Page, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position = UDim2.new(0, 0, 0, 0), GroupTransparency = 0}):Play()
+        
+        TweenService:Create(TabLabel, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {TextColor3 = Evok.ThemeManager:GetColor("Accent")}):Play()
+        if TabIcon then
+            TweenService:Create(TabIcon, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {ImageColor3 = Evok.ThemeManager:GetColor("Accent")}):Play()
+        end
+        TweenService:Create(Highlight, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Size = UDim2.new(1, -10, 0, 2)}):Play()
+        
+        Window.ActiveTab = TabName
+    end)
+
+    -- Efeitos de Hover
+    TabButton.MouseEnter:Connect(function()
+        if Window.ActiveTab ~= TabName then
+            TweenService:Create(TabLabel, TweenInfo.new(0.2), {TextColor3 = Evok.ThemeManager:GetColor("Text")}):Play()
+            if TabIcon then TweenService:Create(TabIcon, TweenInfo.new(0.2), {ImageColor3 = Evok.ThemeManager:GetColor("Text")}):Play() end
+        end
+    end)
+
+    TabButton.MouseLeave:Connect(function()
+        if Window.ActiveTab ~= TabName then
+            TweenService:Create(TabLabel, TweenInfo.new(0.2), {TextColor3 = Evok.ThemeManager:GetColor("TextDark")}):Play()
+            if TabIcon then TweenService:Create(TabIcon, TweenInfo.new(0.2), {ImageColor3 = Evok.ThemeManager:GetColor("TextDark")}):Play() end
+        end
+    end)
+
+    -- Auto-Select se for a primeira Tab
+    if #Window.Tabs == 0 then
+        Window.ActiveTab = TabName
+        Page.Visible = true
+        TabLabel.TextColor3 = Evok.ThemeManager:GetColor("Accent")
+        if TabIcon then TabIcon.ImageColor3 = Evok.ThemeManager:GetColor("Accent") end
+        Highlight.Size = UDim2.new(1, -10, 0, 2)
+    end
+
+    table.insert(Window.Tabs, Tab)
+
+    -- ============================================================================
+    -- 3. SECTION SYSTEM (Agrupamento de Configurações)
+    -- ============================================================================
+    function Tab:CreateSection(SectionName, Side)
+        local Section = {}
+        local TargetColumn = (Side and Side:lower() == "right") and RightColumn or LeftColumn
+
+        local SectionFrame = Evok.Utility.Instance:Create("Frame", {
+            Name = "Section_" .. SectionName,
+            Parent = TargetColumn,
+            Size = UDim2.new(1, 0, 0, 30), -- Altura base
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Container"),
+            BorderSizePixel = 0
+        })
+
+        Evok.Utility.Instance:CreateRound(6).Parent = SectionFrame
+        Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Border"), 1).Parent = SectionFrame
+
+        local SectionPadding = Evok.Utility.Instance:Create("UIPadding", {
+            Parent = SectionFrame,
+            PaddingLeft = UDim.new(0, 10),
+            PaddingRight = UDim.new(0, 10),
+            PaddingTop = UDim.new(0, 8),
+            PaddingBottom = UDim.new(0, 10)
+        })
+
+        local SectionHeader = Evok.Utility.Instance:Create("TextLabel", {
+            Name = "Header",
+            Parent = SectionFrame,
+            Size = UDim2.new(1, 0, 0, 20),
+            BackgroundTransparency = 1,
+            Text = SectionName,
+            TextColor3 = Evok.ThemeManager:GetColor("Text"),
+            Font = Evok.Fonts.Semibold,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left
+        })
+
+        local SectionLine = Evok.Utility.Instance:Create("Frame", {
+            Name = "Separator",
+            Parent = SectionFrame,
+            Size = UDim2.new(1, 0, 0, 1),
+            Position = UDim2.new(0, 0, 0, 25),
+            BackgroundColor3 = Evok.ThemeManager:GetColor("Border"),
+            BorderSizePixel = 0
+        })
+
+        local Container = Evok.Utility.Instance:Create("Frame", {
+            Name = "Container",
+            Parent = SectionFrame,
+            Size = UDim2.new(1, 0, 0, 0),
+            Position = UDim2.new(0, 0, 0, 32),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1
+        })
+
+        local ContainerLayout = Evok.Utility.Instance:Create("UIListLayout", {
+            Parent = Container,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 8)
+        })
+
+        -- Correção de Layout da Section
+        ContainerLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            -- SectionFrame tem AutomaticSize, então o Frame se ajusta sozinho
+            UpdateCanvas()
+        end)
+
+        -- ============================================================================
+        -- 4. LABEL WIDGET
+        -- ============================================================================
+        function Section:CreateLabel(Config)
+            local Text = type(Config) == "string" and Config or Config.Text
+            local Color = Config.Color or Evok.ThemeManager:GetColor("TextDark")
+
+            local LabelFrame = Evok.Utility.Instance:Create("Frame", {
+                Name = "LabelWidget",
+                Parent = Container,
+                Size = UDim2.new(1, 0, 0, 20),
+                BackgroundTransparency = 1
+            })
+
+            local TextLabel = Evok.Utility.Instance:Create("TextLabel", {
+                Parent = LabelFrame,
+                Size = UDim2.new(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                Text = Text,
+                TextColor3 = Color,
+                Font = Evok.Fonts.Main,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                RichText = true
+            })
+
+            return {
+                SetText = function(self, newText)
+                    TextLabel.Text = newText
+                end,
+                SetColor = function(self, newColor)
+                    TweenService:Create(TextLabel, TweenInfo.new(0.2), {TextColor3 = newColor}):Play()
+                end
+            }
+        end
+
+        -- ============================================================================
+        -- 5. BUTTON WIDGET (With Ripple Effect)
+        -- ============================================================================
+        function Section:CreateButton(Config)
+            local Name = Config.Name or "Button"
+            local Callback = Config.Callback or function() end
+            local Tooltip = Config.Tooltip or nil
+
+            local ButtonFrame = Evok.Utility.Instance:Create("Frame", {
+                Name = "Button_" .. Name,
+                Parent = Container,
+                Size = UDim2.new(1, 0, 0, 35),
+                BackgroundColor3 = Evok.ThemeManager:GetColor("Background"),
+                ClipsDescendants = true -- Necessário para o ripple
+            })
+
+            Evok.Utility.Instance:CreateRound(4).Parent = ButtonFrame
+            local Stroke = Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Border"), 1).Parent = ButtonFrame
+
+            local Interact = Evok.Utility.Instance:Create("TextButton", {
+                Parent = ButtonFrame,
+                Size = UDim2.new(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                Text = Name,
+                TextColor3 = Evok.ThemeManager:GetColor("Text"),
+                Font = Evok.Fonts.Semibold,
+                TextSize = 13,
+                AutoButtonColor = false
+            })
+
+            if Tooltip then Evok:AttachTooltip(Interact, Tooltip) end
+
+            -- Efeito Hover Suave
+            Interact.MouseEnter:Connect(function()
+                TweenService:Create(ButtonFrame, TweenInfo.new(0.2), {BackgroundColor3 = Evok.ThemeManager:GetColor("ContainerHover")}):Play()
+                TweenService:Create(Stroke, TweenInfo.new(0.2), {Color = Evok.ThemeManager:GetColor("BorderHighlight")}):Play()
+            end)
+
+            Interact.MouseLeave:Connect(function()
+                TweenService:Create(ButtonFrame, TweenInfo.new(0.2), {BackgroundColor3 = Evok.ThemeManager:GetColor("Background")}):Play()
+                TweenService:Create(Stroke, TweenInfo.new(0.2), {Color = Evok.ThemeManager:GetColor("Border")}):Play()
+            end)
+
+            -- Efeito Ripple & Callback
+            Interact.MouseButton1Down:Connect(function()
+                TweenService:Create(ButtonFrame, TweenInfo.new(0.1), {Size = UDim2.new(0.97, 0, 0, 32)}):Play()
+                
+                -- Ripple Circle
+                local mouseLocation = UserInputService:GetMouseLocation()
+                local buttonAbsolutePos = ButtonFrame.AbsolutePosition
+                local relativeX = mouseLocation.X - buttonAbsolutePos.X
+                local relativeY = mouseLocation.Y - buttonAbsolutePos.Y - 36 -- Compensação do offset do gui
+
+                local Ripple = Evok.Utility.Instance:Create("Frame", {
+                    Parent = ButtonFrame,
+                    BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+                    BackgroundTransparency = 0.8,
+                    Position = UDim2.new(0, relativeX, 0, relativeY),
+                    Size = UDim2.new(0, 0, 0, 0),
+                    AnchorPoint = Vector2.new(0.5, 0.5)
+                })
+                Evok.Utility.Instance:CreateRound(100).Parent = Ripple
+
+                local rippleTween = TweenService:Create(Ripple, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Size = UDim2.new(0, ButtonFrame.AbsoluteSize.X * 2.5, 0, ButtonFrame.AbsoluteSize.X * 2.5),
+                    BackgroundTransparency = 1
+                })
+                rippleTween:Play()
+                rippleTween.Completed:Connect(function()
+                    Ripple:Destroy()
+                end)
+            end)
+
+            Interact.MouseButton1Up:Connect(function()
+                TweenService:Create(ButtonFrame, TweenInfo.new(0.1, Enum.EasingStyle.Bounce), {Size = UDim2.new(1, 0, 0, 35)}):Play()
+                -- Proteção contra múltiplos cliques rápidos (Debounce básico)
+                task.spawn(function()
+                    local success, err = pcall(Callback)
+                    if not success then Evok.Logger:Log("Button Error: " .. tostring(err), "ERROR") end
+                end)
+            end)
+
+            return {
+                Fire = function() Callback() end,
+                SetText = function(self, newName) Interact.Text = newName end
+            }
+        end
+
+        -- ============================================================================
+        -- 6. TOGGLE WIDGET (With Optional Keybind)
+        -- ============================================================================
+        function Section:CreateToggle(Config)
+            local Name = Config.Name or "Toggle"
+            local Default = Config.Default or false
+            local Callback = Config.Callback or function() end
+            local Flag = Config.Flag or (tostring(math.random(1000, 9999)))
+            local Tooltip = Config.Tooltip or nil
+
+            local State = Default
+            Evok.Flags[Flag] = State
+
+            local ToggleFrame = Evok.Utility.Instance:Create("Frame", {
+                Name = "Toggle_" .. Name,
+                Parent = Container,
+                Size = UDim2.new(1, 0, 0, 32),
+                BackgroundTransparency = 1
+            })
+
+            local Interact = Evok.Utility.Instance:Create("TextButton", {
+                Parent = ToggleFrame,
+                Size = UDim2.new(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                Text = ""
+            })
+
+            if Tooltip then Evok:AttachTooltip(Interact, Tooltip) end
+
+            local Label = Evok.Utility.Instance:Create("TextLabel", {
+                Parent = ToggleFrame,
+                Size = UDim2.new(1, -50, 1, 0),
+                Position = UDim2.new(0, 5, 0, 0),
+                BackgroundTransparency = 1,
+                Text = Name,
+                TextColor3 = State and Evok.ThemeManager:GetColor("Text") or Evok.ThemeManager:GetColor("TextDark"),
+                Font = Evok.Fonts.Main,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left
+            })
+
+            -- O Fundo do Switch
+            local SwitchBg = Evok.Utility.Instance:Create("Frame", {
+                Parent = ToggleFrame,
+                Size = UDim2.new(0, 36, 0, 18),
+                Position = UDim2.new(1, -38, 0.5, -9),
+                BackgroundColor3 = State and Evok.ThemeManager:GetColor("Accent") or Evok.ThemeManager:GetColor("Background"),
+            })
+            Evok.Utility.Instance:CreateRound(9).Parent = SwitchBg
+            local SwitchStroke = Evok.Utility.Instance:CreateStroke(State and Evok.ThemeManager:GetColor("Accent") or Evok.ThemeManager:GetColor("Border"), 1).Parent = SwitchBg
+
+            -- A Bolinha do Switch
+            local Indicator = Evok.Utility.Instance:Create("Frame", {
+                Parent = SwitchBg,
+                Size = UDim2.new(0, 14, 0, 14),
+                Position = State and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7),
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            })
+            Evok.Utility.Instance:CreateRound(7).Parent = Indicator
+
+            -- Sombra da Bolinha
+            local IndShadow = Evok.Utility.Instance:Create("ImageLabel", {
+                Parent = Indicator,
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 2),
+                Size = UDim2.new(1, 6, 1, 6),
+                BackgroundTransparency = 1,
+                Image = "rbxassetid://6015897843",
+                ImageColor3 = Color3.fromRGB(0, 0, 0),
+                ImageTransparency = 0.6,
+                ZIndex = 0
+            })
+
+            local function FireToggle(forceState)
+                if forceState ~= nil then State = forceState else State = not State end
+                Evok.Flags[Flag] = State
+
+                if State then
+                    TweenService:Create(SwitchBg, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {BackgroundColor3 = Evok.ThemeManager:GetColor("Accent")}):Play()
+                    TweenService:Create(SwitchStroke, TweenInfo.new(0.25), {Color = Evok.ThemeManager:GetColor("Accent")}):Play()
+                    TweenService:Create(Indicator, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(1, -16, 0.5, -7)}):Play()
+                    TweenService:Create(Label, TweenInfo.new(0.2), {TextColor3 = Evok.ThemeManager:GetColor("Text")}):Play()
+                else
+                    TweenService:Create(SwitchBg, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {BackgroundColor3 = Evok.ThemeManager:GetColor("Background")}):Play()
+                    TweenService:Create(SwitchStroke, TweenInfo.new(0.25), {Color = Evok.ThemeManager:GetColor("Border")}):Play()
+                    TweenService:Create(Indicator, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0, 2, 0.5, -7)}):Play()
+                    TweenService:Create(Label, TweenInfo.new(0.2), {TextColor3 = Evok.ThemeManager:GetColor("TextDark")}):Play()
+                end
+
+                task.spawn(Callback, State)
+            end
+
+            Interact.MouseButton1Click:Connect(function()
+                FireToggle()
+            end)
+
+            -- Hovering Effects
+            Interact.MouseEnter:Connect(function()
+                if not State then TweenService:Create(SwitchStroke, TweenInfo.new(0.2), {Color = Evok.ThemeManager:GetColor("BorderHighlight")}):Play() end
+            end)
+            Interact.MouseLeave:Connect(function()
+                if not State then TweenService:Create(SwitchStroke, TweenInfo.new(0.2), {Color = Evok.ThemeManager:GetColor("Border")}):Play() end
+            end)
+
+            -- Execute initial callback silently if true
+            if Default then task.spawn(Callback, State) end
+
+            return {
+                SetState = function(self, state) FireToggle(state) end,
+                GetState = function(self) return State end
+            }
+        end
+
+        -- ============================================================================
+        -- 7. SLIDER WIDGET (Mathematical Precision & Typing Support)
+        -- ============================================================================
+        function Section:CreateSlider(Config)
+            local Name = Config.Name or "Slider"
+            local Min = Config.Min or 0
+            local Max = Config.Max or 100
+            local Default = Config.Default or Min
+            local Decimals = Config.Decimals or 0
+            local Callback = Config.Callback or function() end
+            local Flag = Config.Flag or (tostring(math.random(1000, 9999)))
+            local Suffix = Config.Suffix or ""
+            
+            local Value = Default
+            Evok.Flags[Flag] = Value
+
+            local SliderFrame = Evok.Utility.Instance:Create("Frame", {
+                Name = "Slider_" .. Name,
+                Parent = Container,
+                Size = UDim2.new(1, 0, 0, 50),
+                BackgroundColor3 = Evok.ThemeManager:GetColor("Background")
+            })
+            
+            Evok.Utility.Instance:CreateRound(4).Parent = SliderFrame
+            Evok.Utility.Instance:CreateStroke(Evok.ThemeManager:GetColor("Border"), 1).Parent = SliderFrame
+
+            local Label = Evok.Utility.Instance:Create("TextLabel", {
+                Parent = SliderFrame,
+                Size = UDim2.new(1, -60, 0, 20),
+                Position = UDim2.new(0, 10, 0, 5),
+                BackgroundTransparency = 1,
+                Text = Name,
+                TextColor3 = Evok.ThemeManager:GetColor("Text"),
+                Font = Evok.Fonts.Main,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left
+            })
+
+            -- Caixa de texto para o valor exato (Permite digitar)
+            local ValueBox = Evok.Utility.Instance:Create("TextBox", {
+                Parent = SliderFrame,
+                Size = UDim2.new(0, 50, 0, 20),
+                Position = UDim2.new(1, -60, 0, 5),
+                BackgroundTransparency = 1,
+                Text = tostring(Value) .. Suffix,
+                TextColor3 = Evok.ThemeManager:GetColor("Accent"),
+                Font = Evok.Fonts.Semibold,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                ClearTextOnFocus = false
+            })
+
+            -- Trilha do Slider
+            local Track = Evok.Utility.Instance:Create("Frame", {
+                Parent = SliderFrame,
+                Size = UDim2.new(1, -20, 0, 6),
+                Position = UDim2.new(0, 10, 0, 32),
+                BackgroundColor3 = Evok.ThemeManager:GetColor("ContainerHover")
+            })
+            Evok.Utility.Instance:CreateRound(3).Parent = Track
+
+            -- Preenchimento do Slider
+            local FillPercentage = (Value - Min) / (Max - Min)
+            local Fill = Evok.Utility.Instance:Create("Frame", {
+                Parent = Track,
+                Size = UDim2.new(FillPercentage, 0, 1, 0),
+                BackgroundColor3 = Evok.ThemeManager:GetColor("Accent")
+            })
+            Evok.Utility.Instance:CreateRound(3).Parent = Fill
+
+            -- Thumb (A Bolinha interativa)
+            local Thumb = Evok.Utility.Instance:Create("Frame", {
+                Parent = Fill,
+                Size = UDim2.new(0, 12, 0, 12),
+                Position = UDim2.new(1, -6, 0.5, -6),
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            })
+            Evok.Utility.Instance:CreateRound(6).Parent = Thumb
+
+            -- Adicionando Sombra ao Thumb para dar profundidade
+            local ThumbShadow = Evok.Utility.Instance:Create("ImageLabel", {
+                Parent = Thumb,
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 2),
+                Size = UDim2.new(1, 8, 1, 8),
+                BackgroundTransparency = 1,
+                Image = "rbxassetid://6015897843",
+                ImageColor3 = Color3.fromRGB(0, 0, 0),
+                ImageTransparency = 0.5,
+                ZIndex = 0
+            })
+
+            local Dragging = false
+            local Connection = nil
+
+            local function SetValue(newValue)
+                newValue = math.clamp(newValue, Min, Max)
+                newValue = Evok.Utility.Math:Round(newValue, Decimals)
+                Value = newValue
+                Evok.Flags[Flag] = Value
+
+                local calcPercentage = (Value - Min) / (Max - Min)
+                
+                -- Formataçao visual do texto
+                ValueBox.Text = string.format("%." .. Decimals .. "f", Value) .. Suffix
+                
+                TweenService:Create(Fill, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(calcPercentage, 0, 1, 0)}):Play()
+                
+                task.spawn(Callback, Value)
+            end
+
+            local function UpdateSlider(Input)
+                local TrackSize = Track.AbsoluteSize.X
+                local TrackPos = Track.AbsolutePosition.X
+                local MousePos = Input.Position.X
+                local Percentage = math.clamp((MousePos - TrackPos) / TrackSize, 0, 1)
+                
+                local calcValue = Min + ((Max - Min) * Percentage)
+                SetValue(calcValue)
+            end
+
+            Track.InputBegan:Connect(function(Input)
+                if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+                    Dragging = true
+                    TweenService:Create(Thumb, TweenInfo.new(0.2), {Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(1, -8, 0.5, -8)}):Play()
+                    UpdateSlider(Input)
+                    
+                    Connection = UserInputService.InputChanged:Connect(function(moveInput)
+                        if moveInput.UserInputType == Enum.UserInputType.MouseMovement or moveInput.UserInputType == Enum.UserInputType.Touch then
+                            UpdateSlider(moveInput)
+                        end
+                    end)
+                end
+            end)
+
+            UserInputService.InputEnded:Connect(function(Input)
+                if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+                    if Dragging then
+                        Dragging = false
+                        TweenService:Create(Thumb, TweenInfo.new(0.2), {Size = UDim2.new(0, 12, 0, 12), Position = UDim2.new(1, -6, 0.5, -6)}):Play()
+                        if Connection then
+                            Connection:Disconnect()
+                            Connection = nil
+                        end
+                    end
+                end
+            end)
+
+            -- Suporte para digitação de valores manuais
+            ValueBox.FocusLost:Connect(function(enterPressed)
+                local num = tonumber(ValueBox.Text:gsub(Suffix, ""))
+                if num then
+                    SetValue(num)
+                else
+                    SetValue(Value) -- Retorna ao valor anterior se for inválido
+                end
+            end)
+
+            -- Execução inicial em background para setar hooks
+            task.spawn(Callback, Value)
+
+            return {
+                SetValue = function(self, val) SetValue(val) end,
+                GetValue = function(self) return Value end
+            }
+        end
+
+        -- Retorno do objeto Section
+        return Section
+    end
+
+    -- Retorno do objeto Tab
+    return Tab
+end
+
+-- ============================================================================
+-- FIM DA PARTE 2 - WIDGETS ENGINE
+-- ============================================================================
+-- Próxima etapa (Parte 3): Dropdowns, ColorPickers, Keybinds e Config System.
+
+-- fim da parte 2
