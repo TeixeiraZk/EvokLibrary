@@ -1,0 +1,828 @@
+--[[
+    ===========================================================================
+    EVOK UI LIBRARY - PARTE 1: CORE ENGINE (MASSIVE EDITION)
+    ===========================================================================
+    Motor principal com arquitetura expandida, 30 equações de easing, 
+    10 temas embutidos e utilitários matemáticos de cor.
+    ===========================================================================
+]]
+
+local Evok = {
+    Version = "1.0.2-PRO-MASSIVE",
+    Flags = {},
+    Connections = {},
+    Instances = {},
+    WindowFunctions = {},
+    DebugMode = true
+}
+Evok.__index = Evok
+
+-- ============================================================================
+-- 1. SERVIÇOS DO ROBLOX E PROTEÇÃO DE AMBIENTE
+-- ============================================================================
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local TextService = game:GetService("TextService")
+local Workspace = game:GetService("Workspace")
+local Stats = game:GetService("Stats")
+local Lighting = game:GetService("Lighting")
+
+local LocalPlayer = Players.LocalPlayer
+
+local ParentGui = CoreGui
+if gethui then
+    ParentGui = gethui()
+elseif not pcall(function() local _ = CoreGui.Name end) then
+    ParentGui = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- ============================================================================
+-- 2. CONFIGURAÇÃO DE FONTES E ÍCONES (ASSET LIBRARY)
+-- ============================================================================
+Evok.Fonts = {
+    Main = Enum.Font.Gotham,
+    Medium = Enum.Font.GothamMedium,
+    Semibold = Enum.Font.GothamSemibold,
+    Bold = Enum.Font.GothamBold,
+    Black = Enum.Font.GothamBlack,
+    Code = Enum.Font.Code,
+    Title = Enum.Font.MontserratBold
+}
+
+Evok.Icons = {
+    Window = {
+        Settings = "rbxassetid://10057377888",
+        Search = "rbxassetid://10057377502",
+        Close = "rbxassetid://10057377610",
+        Minimize = "rbxassetid://10057377750",
+        Maximize = "rbxassetid://10057377888"
+    },
+    Tabs = {
+        Aiming = "rbxassetid://10057376204",
+        Visuals = "rbxassetid://10057376662",
+        Misc = "rbxassetid://10057376483",
+        ScriptViewer = "rbxassetid://10057377218",
+        PlayerList = "rbxassetid://10057377351",
+        Output = "rbxassetid://10057376800",
+        Options = "rbxassetid://10057377045"
+    },
+    Widgets = {
+        DropdownClosed = "rbxassetid://10057378150",
+        DropdownOpen = "rbxassetid://10057378021",
+        Checkmark = "rbxassetid://10057378285",
+        Warning = "rbxassetid://10057378410",
+        Error = "rbxassetid://10057378555",
+        Info = "rbxassetid://10057378680",
+        Success = "rbxassetid://10057378800"
+    }
+}
+
+-- ============================================================================
+-- 3. THEME MANAGER (PALETAS DE CORES EXTENSAS)
+-- ============================================================================
+Evok.ThemeManager = {
+    CurrentTheme = "MatchaPink",
+    Themes = {
+        MatchaPink = {
+            Background = Color3.fromRGB(18, 18, 20),
+            Container = Color3.fromRGB(24, 24, 26),
+            ContainerHover = Color3.fromRGB(30, 30, 33),
+            Accent = Color3.fromRGB(255, 182, 193),
+            Text = Color3.fromRGB(245, 245, 245),
+            TextDark = Color3.fromRGB(150, 150, 155),
+            Border = Color3.fromRGB(40, 40, 45),
+            BorderHighlight = Color3.fromRGB(60, 60, 65),
+            Success = Color3.fromRGB(120, 255, 150),
+            Warning = Color3.fromRGB(255, 230, 120),
+            Error = Color3.fromRGB(255, 100, 100)
+        },
+        EvokDark = {
+            Background = Color3.fromRGB(15, 15, 15),
+            Container = Color3.fromRGB(20, 20, 20),
+            ContainerHover = Color3.fromRGB(25, 25, 25),
+            Accent = Color3.fromRGB(187, 134, 252),
+            Text = Color3.fromRGB(240, 240, 240),
+            TextDark = Color3.fromRGB(140, 140, 140),
+            Border = Color3.fromRGB(35, 35, 35),
+            BorderHighlight = Color3.fromRGB(50, 50, 50),
+            Success = Color3.fromRGB(80, 250, 123),
+            Warning = Color3.fromRGB(241, 250, 140),
+            Error = Color3.fromRGB(255, 85, 85)
+        },
+        Dracula = {
+            Background = Color3.fromRGB(40, 42, 54),
+            Container = Color3.fromRGB(68, 71, 90),
+            ContainerHover = Color3.fromRGB(98, 114, 164),
+            Accent = Color3.fromRGB(255, 121, 198),
+            Text = Color3.fromRGB(248, 248, 242),
+            TextDark = Color3.fromRGB(139, 152, 165),
+            Border = Color3.fromRGB(68, 71, 90),
+            BorderHighlight = Color3.fromRGB(139, 233, 253),
+            Success = Color3.fromRGB(80, 250, 123),
+            Warning = Color3.fromRGB(241, 250, 140),
+            Error = Color3.fromRGB(255, 85, 85)
+        },
+        Nord = {
+            Background = Color3.fromRGB(46, 52, 64),
+            Container = Color3.fromRGB(59, 66, 82),
+            ContainerHover = Color3.fromRGB(67, 76, 94),
+            Accent = Color3.fromRGB(136, 192, 208),
+            Text = Color3.fromRGB(236, 239, 244),
+            TextDark = Color3.fromRGB(216, 222, 233),
+            Border = Color3.fromRGB(76, 86, 106),
+            BorderHighlight = Color3.fromRGB(129, 161, 193),
+            Success = Color3.fromRGB(163, 190, 140),
+            Warning = Color3.fromRGB(235, 203, 139),
+            Error = Color3.fromRGB(191, 97, 106)
+        },
+        Monokai = {
+            Background = Color3.fromRGB(39, 40, 34),
+            Container = Color3.fromRGB(49, 50, 44),
+            ContainerHover = Color3.fromRGB(59, 60, 54),
+            Accent = Color3.fromRGB(166, 226, 46),
+            Text = Color3.fromRGB(248, 248, 242),
+            TextDark = Color3.fromRGB(117, 113, 94),
+            Border = Color3.fromRGB(73, 72, 62),
+            BorderHighlight = Color3.fromRGB(253, 151, 31),
+            Success = Color3.fromRGB(166, 226, 46),
+            Warning = Color3.fromRGB(230, 219, 116),
+            Error = Color3.fromRGB(249, 38, 114)
+        },
+        Catppuccin = {
+            Background = Color3.fromRGB(30, 30, 46),
+            Container = Color3.fromRGB(24, 24, 37),
+            ContainerHover = Color3.fromRGB(49, 50, 68),
+            Accent = Color3.fromRGB(203, 166, 247),
+            Text = Color3.fromRGB(205, 214, 244),
+            TextDark = Color3.fromRGB(166, 173, 200),
+            Border = Color3.fromRGB(69, 71, 90),
+            BorderHighlight = Color3.fromRGB(137, 180, 250),
+            Success = Color3.fromRGB(166, 227, 161),
+            Warning = Color3.fromRGB(249, 226, 175),
+            Error = Color3.fromRGB(243, 139, 168)
+        },
+        TokyoNight = {
+            Background = Color3.fromRGB(26, 27, 38),
+            Container = Color3.fromRGB(36, 40, 59),
+            ContainerHover = Color3.fromRGB(65, 72, 104),
+            Accent = Color3.fromRGB(122, 162, 247),
+            Text = Color3.fromRGB(192, 202, 245),
+            TextDark = Color3.fromRGB(86, 95, 137),
+            Border = Color3.fromRGB(41, 46, 66),
+            BorderHighlight = Color3.fromRGB(187, 154, 247),
+            Success = Color3.fromRGB(158, 206, 106),
+            Warning = Color3.fromRGB(224, 175, 104),
+            Error = Color3.fromRGB(247, 118, 142)
+        },
+        SynthWave = {
+            Background = Color3.fromRGB(38, 35, 53),
+            Container = Color3.fromRGB(45, 41, 62),
+            ContainerHover = Color3.fromRGB(54, 49, 74),
+            Accent = Color3.fromRGB(255, 126, 219),
+            Text = Color3.fromRGB(255, 255, 255),
+            TextDark = Color3.fromRGB(132, 139, 189),
+            Border = Color3.fromRGB(97, 77, 133),
+            BorderHighlight = Color3.fromRGB(54, 249, 246),
+            Success = Color3.fromRGB(114, 241, 184),
+            Warning = Color3.fromRGB(249, 226, 175),
+            Error = Color3.fromRGB(254, 68, 80)
+        },
+        SolarizedDark = {
+            Background = Color3.fromRGB(0, 43, 54),
+            Container = Color3.fromRGB(7, 54, 66),
+            ContainerHover = Color3.fromRGB(88, 110, 117),
+            Accent = Color3.fromRGB(38, 139, 210),
+            Text = Color3.fromRGB(131, 148, 150),
+            TextDark = Color3.fromRGB(101, 123, 131),
+            Border = Color3.fromRGB(88, 110, 117),
+            BorderHighlight = Color3.fromRGB(147, 161, 161),
+            Success = Color3.fromRGB(133, 153, 0),
+            Warning = Color3.fromRGB(181, 137, 0),
+            Error = Color3.fromRGB(220, 50, 47)
+        },
+        Cyberpunk = {
+            Background = Color3.fromRGB(14, 14, 22),
+            Container = Color3.fromRGB(21, 21, 33),
+            ContainerHover = Color3.fromRGB(33, 33, 48),
+            Accent = Color3.fromRGB(0, 255, 255),
+            Text = Color3.fromRGB(255, 255, 255),
+            TextDark = Color3.fromRGB(100, 100, 120),
+            Border = Color3.fromRGB(255, 0, 124),
+            BorderHighlight = Color3.fromRGB(255, 211, 0),
+            Success = Color3.fromRGB(0, 255, 0),
+            Warning = Color3.fromRGB(255, 255, 0),
+            Error = Color3.fromRGB(255, 0, 0)
+        }
+    }
+}
+
+function Evok.ThemeManager:GetColor(ColorName)
+    local theme = self.Themes[self.CurrentTheme]
+    if theme and theme[ColorName] then
+        return theme[ColorName]
+    end
+    -- Fallback de segurança para não dar nil
+    return Color3.new(1, 1, 1)
+end
+
+function Evok.ThemeManager:SetTheme(ThemeName)
+    if self.Themes[ThemeName] then
+        self.CurrentTheme = ThemeName
+    end
+end
+
+-- ============================================================================
+-- 4. UTILITY MODULE (MATEMÁTICA E CORES)
+-- ============================================================================
+Evok.Utility = {
+    Math = {},
+    Color = {},
+    Instance = {},
+    String = {}
+}
+
+-- [ MATH UTILITIES ]
+function Evok.Utility.Math:Round(Number, Decimals)
+    local Mult = 10 ^ (Decimals or 0)
+    return math.floor(Number * Mult + 0.5) / Mult
+end
+
+function Evok.Utility.Math:Clamp(Value, Min, Max)
+    if Value < Min then return Min end
+    if Value > Max then return Max end
+    return Value
+end
+
+function Evok.Utility.Math:Lerp(A, B, T)
+    return A + (B - A) * T
+end
+
+function Evok.Utility.Math:Map(Value, InMin, InMax, OutMin, OutMax)
+    return OutMin + (OutMax - OutMin) * ((Value - InMin) / (InMax - InMin))
+end
+
+-- [ COLOR UTILITIES ]
+function Evok.Utility.Color:ToHex(Color)
+    local r = math.round(Color.R * 255)
+    local g = math.round(Color.G * 255)
+    local b = math.round(Color.B * 255)
+    return string.format("#%02X%02X%02X", r, g, b)
+end
+
+function Evok.Utility.Color:FromHex(Hex)
+    Hex = Hex:gsub("#", "")
+    if #Hex == 3 then
+        Hex = Hex:sub(1,1)..Hex:sub(1,1)..Hex:sub(2,2)..Hex:sub(2,2)..Hex:sub(3,3)..Hex:sub(3,3)
+    end
+    local r = tonumber("0x" .. Hex:sub(1, 2))
+    local g = tonumber("0x" .. Hex:sub(3, 4))
+    local b = tonumber("0x" .. Hex:sub(5, 6))
+    return Color3.fromRGB(r, g, b)
+end
+
+function Evok.Utility.Color:Darken(Color, Amount)
+    local h, s, v = Color3.toHSV(Color)
+    return Color3.fromHSV(h, s, math.clamp(v - Amount, 0, 1))
+end
+
+function Evok.Utility.Color:Lighten(Color, Amount)
+    local h, s, v = Color3.toHSV(Color)
+    return Color3.fromHSV(h, s, math.clamp(v + Amount, 0, 1))
+end
+
+function Evok.Utility.Color:Invert(Color)
+    return Color3.new(1 - Color.R, 1 - Color.G, 1 - Color.B)
+end
+
+function Evok.Utility.Color:Lerp(ColorA, ColorB, Alpha)
+    return ColorA:Lerp(ColorB, Alpha)
+end
+
+-- [ STRING UTILITIES ]
+function Evok.Utility.String:Capitalize(Str)
+    return (Str:gsub("^%l", string.upper))
+end
+
+function Evok.Utility.String:Trim(Str)
+    return (Str:gsub("^%s*(.-)%s*$", "%1"))
+end
+
+function Evok.Utility.String:StartsWith(Str, Start)
+    return string.sub(Str, 1, string.len(Start)) == Start
+end
+
+function Evok.Utility.String:EndsWith(Str, End)
+    return Start == "" or string.sub(Str, -string.len(End)) == End
+end
+
+-- [ INSTANCE UTILITIES ]
+function Evok.Utility.Instance:Create(ClassName, Properties)
+    local Inst = Instance.new(ClassName)
+    for Key, Value in pairs(Properties or {}) do
+        if Key ~= "Parent" then
+            Inst[Key] = Value
+        end
+    end
+    if Properties and Properties.Parent then
+        Inst.Parent = Properties.Parent
+    end
+    table.insert(Evok.Instances, Inst)
+    return Inst
+end
+
+function Evok.Utility.Instance:CreateRound(Radius, Parent)
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, Radius or 6)
+    if Parent then Corner.Parent = Parent end
+    table.insert(Evok.Instances, Corner)
+    return Corner
+end
+
+function Evok.Utility.Instance:CreateStroke(Color, Thickness, Parent)
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color or Color3.new(1, 1, 1)
+    Stroke.Thickness = Thickness or 1
+    Stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    if Parent then Stroke.Parent = Parent end
+    table.insert(Evok.Instances, Stroke)
+    return Stroke
+end
+
+-- ============================================================================
+-- 5. THE ULTIMATE EASING ENGINE
+-- ============================================================================
+-- Todas as equações de interpolação possíveis mapeadas matematicamente.
+Evok.Easing = {}
+
+-- Sine
+function Evok.Easing.SineIn(t) return 1 - math.cos(t * (math.pi / 2)) end
+function Evok.Easing.SineOut(t) return math.sin(t * (math.pi / 2)) end
+function Evok.Easing.SineInOut(t) return -0.5 * (math.cos(math.pi * t) - 1) end
+
+-- Quad
+function Evok.Easing.QuadIn(t) return t * t end
+function Evok.Easing.QuadOut(t) return t * (2 - t) end
+function Evok.Easing.QuadInOut(t) return t < 0.5 and 2 * t * t or -1 + (4 - 2 * t) * t end
+
+-- Cubic
+function Evok.Easing.CubicIn(t) return t * t * t end
+function Evok.Easing.CubicOut(t) t = t - 1 return t * t * t + 1 end
+function Evok.Easing.CubicInOut(t) return t < 0.5 and 4 * t * t * t or (t - 1) * (2 * t - 2) * (2 * t - 2) + 1 end
+
+-- Quart
+function Evok.Easing.QuartIn(t) return t * t * t * t end
+function Evok.Easing.QuartOut(t) t = t - 1 return 1 - (t * t * t * t) end
+function Evok.Easing.QuartInOut(t) return t < 0.5 and 8 * t * t * t * t or 1 - 8 * (t - 1) * (t - 1) * (t - 1) * (t - 1) end
+
+-- Quint
+function Evok.Easing.QuintIn(t) return t * t * t * t * t end
+function Evok.Easing.QuintOut(t) t = t - 1 return 1 + (t * t * t * t * t) end
+function Evok.Easing.QuintInOut(t) return t < 0.5 and 16 * t * t * t * t * t or 1 + 16 * (t - 1) * (t - 1) * (t - 1) * (t - 1) * (t - 1) end
+
+-- Expo
+function Evok.Easing.ExpoIn(t) return t == 0 and 0 or math.pow(2, 10 * (t - 1)) end
+function Evok.Easing.ExpoOut(t) return t == 1 and 1 or 1 - math.pow(2, -10 * t) end
+function Evok.Easing.ExpoInOut(t) 
+    if t == 0 then return 0 end
+    if t == 1 then return 1 end
+    if t < 0.5 then return 0.5 * math.pow(2, 10 * (2 * t - 1)) end
+    return 0.5 * (2 - math.pow(2, -10 * (2 * t - 1)))
+end
+
+-- Circ
+function Evok.Easing.CircIn(t) return 1 - math.sqrt(1 - (t * t)) end
+function Evok.Easing.CircOut(t) t = t - 1 return math.sqrt(1 - (t * t)) end
+function Evok.Easing.CircInOut(t)
+    if t < 0.5 then return 0.5 * (1 - math.sqrt(1 - 4 * (t * t))) end
+    t = t * 2 - 2 return 0.5 * (math.sqrt(1 - (t * t)) + 1)
+end
+
+-- Back
+function Evok.Easing.BackIn(t) local s = 1.70158 return t * t * ((s + 1) * t - s) end
+function Evok.Easing.BackOut(t) local s = 1.70158 t = t - 1 return (t * t * ((s + 1) * t + s) + 1) end
+function Evok.Easing.BackInOut(t)
+    local s = 1.70158 * 1.525
+    if t < 0.5 then
+        t = t * 2
+        return 0.5 * (t * t * ((s + 1) * t - s))
+    end
+    t = t * 2 - 2
+    return 0.5 * (t * t * ((s + 1) * t + s) + 2)
+end
+
+-- Elastic
+function Evok.Easing.ElasticIn(t)
+    if t == 0 then return 0 end
+    if t == 1 then return 1 end
+    local p = 0.3
+    local s = p / 4
+    t = t - 1
+    return -(math.pow(2, 10 * t) * math.sin((t - s) * (2 * math.pi) / p))
+end
+function Evok.Easing.ElasticOut(t)
+    if t == 0 then return 0 end
+    if t == 1 then return 1 end
+    local p = 0.3
+    local s = p / 4
+    return math.pow(2, -10 * t) * math.sin((t - s) * (2 * math.pi) / p) + 1
+end
+
+-- Bounce
+function Evok.Easing.BounceOut(t)
+    if t < (1 / 2.75) then return 7.5625 * t * t end
+    if t < (2 / 2.75) then t = t - (1.5 / 2.75) return 7.5625 * t * t + 0.75 end
+    if t < (2.5 / 2.75) then t = t - (2.25 / 2.75) return 7.5625 * t * t + 0.9375 end
+    t = t - (2.625 / 2.75) return 7.5625 * t * t + 0.984375
+end
+function Evok.Easing.BounceIn(t) return 1 - Evok.Easing.BounceOut(1 - t) end
+
+-- ============================================================================
+-- 6. NOTIFICATION SYSTEM (EXPANDIDO)
+-- ============================================================================
+Evok.NotificationEngine = {
+    Container = nil
+}
+
+function Evok:Notify(Config)
+    if not self.NotificationEngine.Container then
+        local Screen = self.Utility.Instance:Create("ScreenGui", {
+            Name = "Evok_Notifications",
+            Parent = ParentGui,
+            ZIndexBehavior = Enum.ZIndexBehavior.Global,
+            ResetOnSpawn = false
+        })
+        self.NotificationEngine.Container = self.Utility.Instance:Create("Frame", {
+            Parent = Screen,
+            AnchorPoint = Vector2.new(1, 1),
+            Position = UDim2.new(1, -20, 1, -20),
+            Size = UDim2.new(0, 320, 1, 0),
+            BackgroundTransparency = 1
+        })
+        self.Utility.Instance:Create("UIListLayout", {
+            Parent = self.NotificationEngine.Container,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Bottom,
+            HorizontalAlignment = Enum.HorizontalAlignment.Right,
+            Padding = UDim.new(0, 10)
+        })
+    end
+
+    local Title = Config.Title or "Notification"
+    local Content = Config.Content or ""
+    local Duration = Config.Duration or 5
+    local Type = Config.Type or "Info"
+
+    local ThemeColor = self.ThemeManager:GetColor("Accent")
+    if Type == "Success" then ThemeColor = self.ThemeManager:GetColor("Success") end
+    if Type == "Warning" then ThemeColor = self.ThemeManager:GetColor("Warning") end
+    if Type == "Error" then ThemeColor = self.ThemeManager:GetColor("Error") end
+
+    local Frame = self.Utility.Instance:Create("Frame", {
+        Parent = self.NotificationEngine.Container,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = self.ThemeManager:GetColor("Container"),
+        BackgroundTransparency = 1,
+        ClipsDescendants = true
+    })
+
+    self.Utility.Instance:CreateRound(6, Frame)
+    self.Utility.Instance:CreateStroke(self.ThemeManager:GetColor("Border"), 1, Frame)
+
+    local SideBar = self.Utility.Instance:Create("Frame", {
+        Parent = Frame,
+        Size = UDim2.new(0, 4, 1, 0),
+        BackgroundColor3 = ThemeColor,
+        BorderSizePixel = 0
+    })
+    
+    local TitleLabel = self.Utility.Instance:Create("TextLabel", {
+        Parent = Frame,
+        Size = UDim2.new(1, -45, 0, 20),
+        Position = UDim2.new(0, 15, 0, 10),
+        BackgroundTransparency = 1,
+        Text = Title,
+        TextColor3 = self.ThemeManager:GetColor("Text"),
+        Font = self.Fonts.Bold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+
+    local ContentLabel = self.Utility.Instance:Create("TextLabel", {
+        Parent = Frame,
+        Size = UDim2.new(1, -30, 0, 0),
+        Position = UDim2.new(0, 15, 0, 35),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        Text = Content,
+        TextColor3 = self.ThemeManager:GetColor("TextDark"),
+        Font = self.Fonts.Main,
+        TextSize = 13,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top
+    })
+
+    self.Utility.Instance:Create("UIPadding", {
+        Parent = Frame,
+        PaddingBottom = UDim.new(0, 20)
+    })
+
+    TweenService:Create(Frame, TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
+        BackgroundTransparency = 0
+    }):Play()
+
+    task.delay(Duration, function()
+        local tw = TweenService:Create(Frame, TweenInfo.new(0.4, Enum.EasingStyle.Sine, Enum.EasingDirection.In), {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 0)
+        })
+        tw:Play()
+        tw.Completed:Wait()
+        Frame:Destroy()
+    end)
+end
+
+-- ============================================================================
+-- 7. ADVANCED WATERMARK SYSTEM
+-- ============================================================================
+function Evok:CreateWatermark(Text)
+    local Screen = self.Utility.Instance:Create("ScreenGui", {
+        Name = "Evok_Watermark_Pro",
+        Parent = ParentGui,
+        ZIndexBehavior = Enum.ZIndexBehavior.Global,
+        IgnoreGuiInset = true,
+        ResetOnSpawn = false
+    })
+
+    local Frame = self.Utility.Instance:Create("Frame", {
+        Parent = Screen,
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -15, 0, 15),
+        Size = UDim2.new(0, 0, 0, 28),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundColor3 = self.ThemeManager:GetColor("Container"),
+        BorderSizePixel = 0
+    })
+
+    self.Utility.Instance:CreateRound(4, Frame)
+    self.Utility.Instance:CreateStroke(self.ThemeManager:GetColor("Border"), 1, Frame)
+
+    local Highlight = self.Utility.Instance:Create("Frame", {
+        Parent = Frame,
+        Size = UDim2.new(1, 0, 0, 2),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = self.ThemeManager:GetColor("Accent"),
+        BorderSizePixel = 0
+    })
+    self.Utility.Instance:CreateRound(4, Highlight)
+
+    self.Utility.Instance:Create("UIPadding", {
+        Parent = Frame,
+        PaddingLeft = UDim.new(0, 12),
+        PaddingRight = UDim.new(0, 12)
+    })
+
+    local Label = self.Utility.Instance:Create("TextLabel", {
+        Parent = Frame,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        Text = Text or "Evok UI",
+        TextColor3 = self.ThemeManager:GetColor("Text"),
+        Font = self.Fonts.Code,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        RichText = true
+    })
+
+    local FrameCount = 0
+    local LastTick = tick()
+
+    local Conn = RunService.RenderStepped:Connect(function()
+        FrameCount = FrameCount + 1
+        if tick() - LastTick >= 1 then
+            local fps = math.floor(FrameCount / (tick() - LastTick))
+            local ping = "N/A"
+            local memory = math.floor(Stats:GetTotalMemoryUsageMb())
+            
+            local success, stats = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValueString() end)
+            if success and stats then ping = stats:match("%d+") or "0" end
+            
+            local hexAccent = self.Utility.Color:ToHex(self.ThemeManager:GetColor("Accent"))
+            local timeStr = os.date("%H:%M:%S")
+            
+            Label.Text = string.format(
+                "<font color='%s'>%s</font> | %s FPS | %sms | %s MB | %s", 
+                hexAccent, Text or "Evok", tostring(fps), tostring(ping), tostring(memory), timeStr
+            )
+            
+            FrameCount = 0
+            LastTick = tick()
+        end
+    end)
+    table.insert(self.Connections, Conn)
+
+    return {
+        SetVisible = function(state) Frame.Visible = state end,
+        Destroy = function() Screen:Destroy() Conn:Disconnect() end
+    }
+end
+
+-- ============================================================================
+-- 8. WINDOW CONSTRUCTOR (O CORE VISUAL)
+-- ============================================================================
+function Evok:CreateWindow(Config)
+    local Window = {
+        Tabs = {},
+        ActiveTab = nil,
+        Dragging = false
+    }
+
+    local Existing = ParentGui:FindFirstChild("Evok_Main_Interface")
+    if Existing then Existing:Destroy() end
+
+    local MainGui = self.Utility.Instance:Create("ScreenGui", {
+        Name = "Evok_Main_Interface",
+        Parent = ParentGui,
+        ZIndexBehavior = Enum.ZIndexBehavior.Global,
+        ResetOnSpawn = false,
+        IgnoreGuiInset = true
+    })
+    Window.Gui = MainGui
+
+    local RootSize = Config.Size or UDim2.new(0, 550, 0, 650)
+    local RootFrame = self.Utility.Instance:Create("Frame", {
+        Name = "Root",
+        Parent = MainGui,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = self.ThemeManager:GetColor("Background"),
+        BorderSizePixel = 0,
+        ClipsDescendants = true
+    })
+    Window.Root = RootFrame
+
+    self.Utility.Instance:CreateRound(8, RootFrame)
+    self.Utility.Instance:CreateStroke(self.ThemeManager:GetColor("Border"), 1, RootFrame)
+
+    local Glow = self.Utility.Instance:Create("ImageLabel", {
+        Name = "GlowShadow",
+        Parent = RootFrame,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(1, 40, 1, 40),
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://6014261993",
+        ImageColor3 = Color3.new(0, 0, 0),
+        ImageTransparency = 0.5,
+        SliceCenter = Rect.new(49, 49, 450, 450),
+        ScaleType = Enum.ScaleType.Slice,
+        ZIndex = -1
+    })
+
+    local Header = self.Utility.Instance:Create("Frame", {
+        Name = "Header",
+        Parent = RootFrame,
+        Size = UDim2.new(1, 0, 0, 35),
+        BackgroundColor3 = self.ThemeManager:GetColor("Background"),
+        BorderSizePixel = 0,
+        ZIndex = 2
+    })
+
+    local HeaderIcon = self.Utility.Instance:Create("ImageLabel", {
+        Name = "Icon",
+        Parent = Header,
+        Size = UDim2.new(0, 16, 0, 16),
+        Position = UDim2.new(0, 12, 0.5, -8),
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://10057377888",
+        ImageColor3 = self.ThemeManager:GetColor("Accent")
+    })
+
+    local Title = self.Utility.Instance:Create("TextLabel", {
+        Name = "Title",
+        Parent = Header,
+        Size = UDim2.new(1, -50, 1, 0),
+        Position = UDim2.new(0, 35, 0, 0),
+        BackgroundTransparency = 1,
+        Text = Config.Title or "Evok Framework",
+        TextColor3 = self.ThemeManager:GetColor("Text"),
+        Font = self.Fonts.Semibold,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        RichText = true
+    })
+
+    local HeaderLine = self.Utility.Instance:Create("Frame", {
+        Name = "HeaderLine",
+        Parent = Header,
+        Size = UDim2.new(1, 0, 0, 1),
+        Position = UDim2.new(0, 0, 1, 0),
+        BackgroundColor3 = self.ThemeManager:GetColor("Border"),
+        BorderSizePixel = 0
+    })
+
+    local TabNavigation = self.Utility.Instance:Create("ScrollingFrame", {
+        Name = "TabNavigation",
+        Parent = RootFrame,
+        Size = UDim2.new(1, -20, 0, 30),
+        Position = UDim2.new(0, 10, 0, 45),
+        BackgroundTransparency = 1,
+        ScrollBarThickness = 0,
+        ScrollingDirection = Enum.ScrollingDirection.X
+    })
+    Window.Navigation = TabNavigation
+
+    local NavLayout = self.Utility.Instance:Create("UIListLayout", {
+        Parent = TabNavigation,
+        FillDirection = Enum.FillDirection.Horizontal,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 5)
+    })
+    NavLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        TabNavigation.CanvasSize = UDim2.new(0, NavLayout.AbsoluteContentSize.X, 0, 0)
+    end)
+
+    local PagesContainer = self.Utility.Instance:Create("Frame", {
+        Name = "PagesContainer",
+        Parent = RootFrame,
+        Size = UDim2.new(1, -20, 1, -85),
+        Position = UDim2.new(0, 10, 0, 75),
+        BackgroundTransparency = 1
+    })
+    Window.Pages = PagesContainer
+
+    -- ============================================================================
+    -- 9. SISTEMA DE ARRASTE SUAVE E COMPATIBILIDADE MOBILE
+    -- ============================================================================
+    local DragInput, DragStart, StartPos
+    
+    local function UpdateDrag(input)
+        local Delta = input.Position - DragStart
+        local TargetPos = UDim2.new(
+            StartPos.X.Scale, StartPos.X.Offset + Delta.X,
+            StartPos.Y.Scale, StartPos.Y.Offset + Delta.Y
+        )
+        TweenService:Create(RootFrame, TweenInfo.new(0.15, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+            Position = TargetPos
+        }):Play()
+    end
+
+    Header.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            Window.Dragging = true
+            DragStart = input.Position
+            StartPos = RootFrame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    Window.Dragging = false
+                end
+            end)
+        end
+    end)
+
+    Header.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            DragInput = input
+        end
+    end)
+
+    local DragConn = UserInputService.InputChanged:Connect(function(input)
+        if input == DragInput and Window.Dragging then
+            UpdateDrag(input)
+        end
+    end)
+    table.insert(Evok.Connections, DragConn)
+
+    local ToggleConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if not gameProcessed then
+            if input.KeyCode == Enum.KeyCode.RightShift or input.KeyCode == Enum.KeyCode.Insert then
+                MainGui.Enabled = not MainGui.Enabled
+            end
+        end
+    end)
+    table.insert(Evok.Connections, ToggleConn)
+
+    local BootTween = TweenService:Create(RootFrame, TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+        Size = RootSize
+    })
+    BootTween:Play()
+    BootTween.Completed:Connect(function()
+        RootFrame.ClipsDescendants = false
+    end)
+
+    setmetatable(Window, {__index = Evok.WindowFunctions})
+
+    return Window
+end
+
+return Evok
+
+-- FIM DA PARTE 1
