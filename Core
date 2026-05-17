@@ -1,0 +1,1259 @@
+-- Evok - Zynn Love You <3
+-- Core/Utility.lua
+
+local Utility = {}
+Utility.__index = Utility
+
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+
+Utility.Signals = {}
+Utility.Objects = {}
+Utility.Cache = {}
+Utility.Bindings = {}
+
+function Utility.Clamp(Value, Min, Max)
+	if Value < Min then
+		return Min
+	elseif Value > Max then
+		return Max
+	end
+	return Value
+end
+
+function Utility.Lerp(A, B, Alpha)
+	return A + (B - A) * Alpha
+end
+
+function Utility.Round(Number, Decimals)
+	Decimals = Decimals or 0
+	local Mult = 10 ^ Decimals
+	return math.floor(Number * Mult + 0.5) / Mult
+end
+
+function Utility.LerpColor(ColorA, ColorB, Alpha)
+	return Color3.new(
+		Utility.Lerp(ColorA.R, ColorB.R, Alpha),
+		Utility.Lerp(ColorA.G, ColorB.G, Alpha),
+		Utility.Lerp(ColorA.B, ColorB.B, Alpha)
+	)
+end
+
+function Utility.TweenObject(Object, TweenInfoData, Goal)
+	local Tween = TweenService:Create(Object, TweenInfoData, Goal)
+	Tween:Play()
+	return Tween
+end
+
+function Utility.InstantTween(Object, Goal)
+	for Property, Value in pairs(Goal) do
+		Object[Property] = Value
+	end
+end
+
+function Utility.CreateSignal()
+	local Signal = {}
+	Signal._binds = {}
+
+	function Signal:Connect(Fn)
+		local Bind = {
+			Fn = Fn,
+			Connected = true
+		}
+
+		function Bind:Disconnect()
+			self.Connected = false
+		end
+
+		table.insert(Signal._binds, Bind)
+		return Bind
+	end
+
+	function Signal:Fire(...)
+		for _, Bind in ipairs(Signal._binds) do
+			if Bind.Connected then
+				task.spawn(Bind.Fn, ...)
+			end
+		end
+	end
+
+	function Signal:Destroy()
+		table.clear(Signal._binds)
+	end
+
+	return Signal
+end
+
+function Utility.Maid()
+	local Maid = {Tasks = {}}
+
+	function Maid:Give(Task)
+		table.insert(self.Tasks, Task)
+		return Task
+	end
+
+	function Maid:DoCleaning()
+		for _, Task in ipairs(self.Tasks) do
+			local TypeName = typeof(Task)
+			if TypeName == "RBXScriptConnection" then
+				Task:Disconnect()
+			elseif TypeName == "Instance" then
+				Task:Destroy()
+			elseif type(Task) == "function" then
+				pcall(Task)
+			end
+		end
+		table.clear(self.Tasks)
+	end
+
+	return Maid
+end
+
+function Utility.CreateInstance(ClassName, Properties)
+	local Obj = Instance.new(ClassName)
+	for Prop, Value in pairs(Properties or {}) do
+		Obj[Prop] = Value
+	end
+	return Obj
+end
+
+function Utility.SetProperties(Obj, Properties)
+	for Prop, Value in pairs(Properties or {}) do
+		Obj[Prop] = Value
+	end
+	return Obj
+end
+
+function Utility.DeepCopy(Table)
+	local Copy = {}
+	for Key, Value in pairs(Table) do
+		if type(Value) == "table" then
+			Copy[Key] = Utility.DeepCopy(Value)
+		else
+			Copy[Key] = Value
+		end
+	end
+	return Copy
+end
+
+function Utility.JSONEncode(Data)
+	return HttpService:JSONEncode(Data)
+end
+
+function Utility.JSONDecode(Data)
+	return HttpService:JSONDecode(Data)
+end
+
+function Utility.SafeCall(Fn, ...)
+	local Ok, Result = pcall(Fn, ...)
+	return Ok, Result
+end
+
+function Utility.GetLocalPlayer()
+	return Players.LocalPlayer
+end
+
+function Utility.GetMouse()
+	return Utility.GetLocalPlayer():GetMouse()
+end
+
+function Utility.WaitForChild(Parent, Name, Timeout)
+	local Start = os.clock()
+	local Child = Parent:FindFirstChild(Name)
+	while not Child do
+		if Timeout and os.clock() - Start > Timeout then
+			return nil
+		end
+		task.wait()
+		Child = Parent:FindFirstChild(Name)
+	end
+	return Child
+end
+
+function Utility.CreateConnection(Obj, EventName, Fn, Maid)
+	local Conn = Obj[EventName]:Connect(Fn)
+	if Maid then
+		Maid:Give(Conn)
+	end
+	return Conn
+end
+
+function Utility.FormatNumber(Number)
+	local Formatted = tostring(Number)
+	while true do
+		Formatted, Count = string.gsub(Formatted, "^(-?%d+)(%d%d%d)", "%1,%2")
+		if Count == 0 then
+			break
+		end
+	end
+	return Formatted
+end
+
+function Utility.GetTimeString()
+	return os.date("%H:%M:%S")
+end
+
+function Utility.Pulse(Speed, Min, Max, Offset)
+	Offset = Offset or 0
+	local Alpha = (math.sin((tick() + Offset) * Speed) + 1) / 2
+	return Utility.Lerp(Min, Max, Alpha)
+end
+
+function Utility.BindRenderStep(Name, Priority, Fn)
+	RunService:BindToRenderStep(Name, Priority, Fn)
+end
+
+function Utility.UnbindRenderStep(Name)
+	pcall(function()
+		RunService:UnbindFromRenderStep(Name)
+	end)
+end
+
+function Utility.MakeCorner(Parent, Radius)
+	return Utility.CreateInstance("UICorner", {
+		CornerRadius = Radius or UDim.new(0, 12),
+		Parent = Parent
+	})
+end
+
+function Utility.MakeStroke(Parent, Color, Thickness, Transparency)
+	return Utility.CreateInstance("UIStroke", {
+		Color = Color or Color3.fromRGB(255, 255, 255),
+		Thickness = Thickness or 1,
+		Transparency = Transparency or 0.5,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Parent = Parent
+	})
+end
+
+function Utility.MakePadding(Parent, Left, Right, Top, Bottom)
+	return Utility.CreateInstance("UIPadding", {
+		PaddingLeft = UDim.new(0, Left or 0),
+		PaddingRight = UDim.new(0, Right or 0),
+		PaddingTop = UDim.new(0, Top or 0),
+		PaddingBottom = UDim.new(0, Bottom or 0),
+		Parent = Parent
+	})
+end
+
+function Utility.MakeListLayout(Parent, Padding, FillDirection, SortOrder)
+	return Utility.CreateInstance("UIListLayout", {
+		Padding = UDim.new(0, Padding or 0),
+		FillDirection = FillDirection or Enum.FillDirection.Vertical,
+		SortOrder = SortOrder or Enum.SortOrder.LayoutOrder,
+		Parent = Parent
+	})
+end
+
+function Utility.MakeGridLayout(Parent, CellSize, CellPadding)
+	return Utility.CreateInstance("UIGridLayout", {
+		CellSize = CellSize or UDim2.fromOffset(100, 100),
+		CellPadding = CellPadding or UDim2.fromOffset(8, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = Parent
+	})
+end
+
+function Utility.MakeGradient(Parent, ColorSequence, Rotation)
+	return Utility.CreateInstance("UIGradient", {
+		Color = ColorSequence or ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
+		}),
+		Rotation = Rotation or 0,
+		Parent = Parent
+	})
+end
+
+function Utility.ClearChildren(Parent)
+	for _, Child in ipairs(Parent:GetChildren()) do
+		Child:Destroy()
+	end
+end
+
+function Utility.DestroyIfExists(Obj)
+	if Obj and Obj.Destroy then
+		Obj:Destroy()
+	end
+end
+
+function Utility.IsMobile()
+	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+end
+
+function Utility.IsPC()
+	return UserInputService.KeyboardEnabled
+end
+
+function Utility.GetMemoryUsage()
+	local Stats = game:GetService("Stats")
+	local Item = Stats:FindFirstChild("Workspace")
+	if Item and Item.GetTotalMemoryUsageMb then
+		return math.floor(Item:GetTotalMemoryUsageMb())
+	end
+	return 0
+end
+
+function Utility.CreateBlur(Name, Size)
+	local Blur = Lighting:FindFirstChild(Name) or Instance.new("BlurEffect")
+	Blur.Name = Name
+	Blur.Size = Size or 0
+	Blur.Parent = Lighting
+	return Blur
+end
+
+function Utility.DestroyBlur(Name)
+	local Blur = Lighting:FindFirstChild(Name)
+	if Blur and Blur:IsA("BlurEffect") then
+		Blur:Destroy()
+	end
+end
+
+function Utility.TrackProperty(Obj, Prop, Fn, Maid)
+	local Conn = Obj:GetPropertyChangedSignal(Prop):Connect(function()
+		Fn(Obj[Prop])
+	end)
+	if Maid then
+		Maid:Give(Conn)
+	end
+	return Conn
+end
+
+function Utility.NextFrame()
+	RunService.RenderStepped:Wait()
+end
+
+function Utility.WaitSeconds(Time)
+	task.wait(Time)
+end
+
+function Utility.AnchorCenter(Obj)
+	Obj.AnchorPoint = Vector2.new(0.5, 0.5)
+end
+
+function Utility.FullSize(Obj)
+	Obj.Size = UDim2.new(1, 0, 1, 0)
+end
+
+function Utility.CenterPosition()
+	return UDim2.new(0.5, 0, 0.5, 0)
+end
+
+function Utility.SetTransparencyDescendants(Parent, Value)
+	for _, Desc in ipairs(Parent:GetDescendants()) do
+		if Desc:IsA("GuiObject") then
+			if Desc.BackgroundTransparency ~= nil then
+				Desc.BackgroundTransparency = Value
+			end
+		end
+	end
+end
+
+function Utility.FadeGuiObject(Object, Target, Duration, EasingStyle, EasingDirection)
+	local Info = TweenInfo.new(
+		Duration or 0.25,
+		EasingStyle or Enum.EasingStyle.Quad,
+		EasingDirection or Enum.EasingDirection.Out
+	)
+	return Utility.TweenObject(Object, Info, Target)
+end
+
+function Utility.ScaleGuiObject(Object, ScaleValue, Duration)
+	local Scale = Object:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
+	Scale.Parent = Object
+	return Utility.TweenObject(Scale, TweenInfo.new(Duration or 0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Scale = ScaleValue})
+end
+
+function Utility.Ripple(parent, color)
+	local RippleFrame = Utility.CreateInstance("Frame", {
+		BackgroundColor3 = color or Color3.fromRGB(255, 255, 255),
+		BackgroundTransparency = 0.7,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(0, 0),
+		Parent = parent
+	})
+	Utility.MakeCorner(RippleFrame, UDim.new(1, 0))
+	task.spawn(function()
+		local target = math.max(parent.AbsoluteSize.X, parent.AbsoluteSize.Y) * 2
+		Utility.TweenObject(RippleFrame, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+			BackgroundTransparency = 1,
+			Size = UDim2.fromOffset(target, target),
+			Position = UDim2.new(0.5, -target / 2, 0.5, -target / 2)
+		})
+		task.wait(0.5)
+		RippleFrame:Destroy()
+	end)
+	return RippleFrame
+end
+
+function Utility.PreventOverflow(Obj)
+	if Obj:IsA("ScrollingFrame") then
+		Obj.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	end
+end
+
+function Utility.GetViewport()
+	return workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.zero
+end
+
+function Utility.CalculateCenterOffset(Size)
+	local Viewport = Utility.GetViewport()
+	return UDim2.fromOffset((Viewport.X - Size.X) / 2, (Viewport.Y - Size.Y) / 2)
+end
+
+function Utility.MakeResponsive(Obj, MinScale, MaxScale)
+	local Viewport = Utility.GetViewport()
+	local Base = math.min(Viewport.X / 1920, Viewport.Y / 1080)
+	local Scale = math.clamp(Base, MinScale or 0.75, MaxScale or 1)
+	local UIScale = Obj:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
+	UIScale.Parent = Obj
+	UIScale.Scale = Scale
+	return UIScale
+end
+
+return Utility
+
+-- Evok - Zynn Love You <3
+-- Core/Easing.lua
+
+local Easing = {}
+
+Easing.Functions = {
+	Linear = function(t) return t end,
+	Sine = function(t) return 1 - math.cos((t * math.pi) / 2) end,
+	Quad = function(t) return t * t end,
+	Cubic = function(t) return t * t * t end,
+	Quart = function(t) return t ^ 4 end,
+	Quint = function(t) return t ^ 5 end,
+	Expo = function(t) return t == 0 and 0 or 2 ^ (10 * (t - 1)) end,
+	Circ = function(t) return 1 - math.sqrt(1 - t * t) end,
+	Back = function(t)
+		local s = 1.70158
+		return t * t * ((s + 1) * t - s)
+	end,
+	Elastic = function(t)
+		if t == 0 or t == 1 then
+			return t
+		end
+		return -2 ^ (10 * (t - 1)) * math.sin((t - 1.075) * (2 * math.pi) / 0.3)
+	end,
+	Bounce = function(t)
+		if t < 1 / 2.75 then
+			return 7.5625 * t * t
+		elseif t < 2 / 2.75 then
+			t = t - 1.5 / 2.75
+			return 7.5625 * t * t + 0.75
+		elseif t < 2.5 / 2.75 then
+			t = t - 2.25 / 2.75
+			return 7.5625 * t * t + 0.9375
+		else
+			t = t - 2.625 / 2.75
+			return 7.5625 * t * t + 0.984375
+		end
+	end,
+	Spring = function(t)
+		return (1 - math.cos(t * math.pi * 2)) * (1 - t)
+	end,
+}
+
+function Easing.Apply(Name, Alpha)
+	local Fn = Easing.Functions[Name] or Easing.Functions.Quad
+	return Fn(math.clamp(Alpha, 0, 1))
+end
+
+function Easing.InOut(Name, Alpha)
+	Alpha = math.clamp(Alpha, 0, 1)
+	local InName = Easing.Functions[Name] or Easing.Functions.Quad
+	if Alpha < 0.5 then
+		return InName(Alpha * 2) / 2
+	end
+	return 1 - InName((1 - Alpha) * 2) / 2
+end
+
+function Easing.Lerp(A, B, Alpha, Name)
+	return A + (B - A) * Easing.Apply(Name or "Quad", Alpha)
+end
+
+function Easing.Lerp2(A, B, Alpha, Name)
+	return Vector2.new(
+		Easing.Lerp(A.X, B.X, Alpha, Name),
+		Easing.Lerp(A.Y, B.Y, Alpha, Name)
+	)
+end
+
+function Easing.Lerp3(A, B, Alpha, Name)
+	return Vector3.new(
+		Easing.Lerp(A.X, B.X, Alpha, Name),
+		Easing.Lerp(A.Y, B.Y, Alpha, Name),
+		Easing.Lerp(A.Z, B.Z, Alpha, Name)
+	)
+end
+
+function Easing.LerpColor(A, B, Alpha, Name)
+	return Color3.new(
+		Easing.Lerp(A.R, B.R, Alpha, Name),
+		Easing.Lerp(A.G, B.G, Alpha, Name),
+		Easing.Lerp(A.B, B.B, Alpha, Name)
+	)
+end
+
+return Easing
+
+-- Evok - Zynn Love You <3
+-- Core/ThemeManager.lua
+
+local ThemeManager = {}
+ThemeManager.__index = ThemeManager
+
+ThemeManager.Themes = {
+	Default = {
+		PrimaryColor = Color3.fromRGB(199, 125, 255),
+		SecondaryColor = Color3.fromRGB(157, 78, 221),
+		AccentColor = Color3.fromRGB(255, 179, 255),
+		Background = Color3.fromRGB(10, 10, 10),
+		Panel = Color3.fromRGB(16, 16, 16),
+		PanelAlt = Color3.fromRGB(22, 22, 22),
+		TextColor = Color3.fromRGB(245, 245, 245),
+		MutedTextColor = Color3.fromRGB(175, 175, 175),
+		StrokeColor = Color3.fromRGB(76, 46, 96),
+		ShadowColor = Color3.fromRGB(0, 0, 0),
+		Transparency = 0.12,
+	},
+}
+
+ThemeManager.CurrentTheme = ThemeManager.Themes.Default
+ThemeManager.Registered = {}
+ThemeManager.Queued = {}
+
+function ThemeManager:SetTheme(Name, Theme)
+	if Theme then
+		self.Themes[Name] = Theme
+	end
+	if self.Themes[Name] then
+		self.CurrentTheme = self.Themes[Name]
+		self:ApplyTheme()
+	end
+end
+
+function ThemeManager:SetCurrentTheme(Theme)
+	if Theme then
+		self.CurrentTheme = Theme
+		self:ApplyTheme()
+	end
+end
+
+function ThemeManager:UpdateAccent(Color)
+	self.CurrentTheme.PrimaryColor = Color
+	self:ApplyTheme()
+end
+
+function ThemeManager:RegisterObject(Object, Property, Key)
+	Key = Key or Property
+	self.Registered[Object] = self.Registered[Object] or {}
+	self.Registered[Object][Key] = Property
+	self:ApplyObject(Object)
+end
+
+function ThemeManager:UnregisterObject(Object)
+	self.Registered[Object] = nil
+end
+
+function ThemeManager:SetProperty(Key, Value)
+	self.CurrentTheme[Key] = Value
+	self:ApplyTheme()
+end
+
+function ThemeManager:Get(Key)
+	return self.CurrentTheme[Key]
+end
+
+function ThemeManager:ApplyObject(Object)
+	if not Object or not Object.Parent then return end
+	local Info = self.Registered[Object]
+	if not Info then return end
+	local Theme = self.CurrentTheme
+	for Key, Property in pairs(Info) do
+		pcall(function()
+			if Key == "Background" then Object[Property] = Theme.Background end
+			if Key == "PrimaryColor" then Object[Property] = Theme.PrimaryColor end
+			if Key == "SecondaryColor" then Object[Property] = Theme.SecondaryColor end
+			if Key == "AccentColor" then Object[Property] = Theme.AccentColor end
+			if Key == "TextColor" then Object[Property] = Theme.TextColor end
+			if Key == "MutedTextColor" then Object[Property] = Theme.MutedTextColor end
+			if Key == "StrokeColor" then Object[Property] = Theme.StrokeColor end
+			if Key == "Panel" then Object[Property] = Theme.Panel end
+			if Key == "PanelAlt" then Object[Property] = Theme.PanelAlt end
+		end)
+	end
+end
+
+function ThemeManager:ApplyTheme()
+	for Object in pairs(self.Registered) do
+		self:ApplyObject(Object)
+	end
+end
+
+return ThemeManager
+
+-- Evok - Zynn Love You <3
+-- Core/WindowManager.lua
+
+local Utility = require(script.Parent.Utility)
+local Easing = require(script.Parent.Easing)
+local ThemeManager = require(script.Parent.ThemeManager)
+
+local WindowManager = {}
+WindowManager.__index = WindowManager
+
+function WindowManager.CreateWindow(Config)
+	Config = Config or {}
+
+	local self = setmetatable({}, WindowManager)
+	self.Maid = Utility.Maid()
+	self.Visible = false
+	self.Dragging = false
+	self.Resizing = false
+	self.Title = Config.Title or "Evok - Zynn Love You <3"
+	self.Parent = Config.Parent or game:GetService("CoreGui")
+	self.TargetSize = Config.Size or UDim2.fromOffset(620, 440)
+	self.TargetPosition = Config.Position or UDim2.new(0.5, -310, 0.5, -220)
+	self.Theme = ThemeManager.CurrentTheme
+	self.CanResize = true
+	self.CanDrag = true
+	self.TweenTime = 0.35
+
+	local ScreenGui = Utility.CreateInstance("ScreenGui", {
+		Name = "EvokUI",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 9999,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = self.Parent,
+	})
+
+	local Main = Utility.CreateInstance("Frame", {
+		Name = "Main",
+		Size = self.TargetSize,
+		Position = self.TargetPosition,
+		BackgroundColor3 = self.Theme.Background,
+		BackgroundTransparency = 0.08,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Parent = ScreenGui,
+	})
+
+	Utility.MakeCorner(Main, UDim.new(0, 14))
+
+	local Shadow = Utility.CreateInstance("ImageLabel", {
+		Name = "Shadow",
+		BackgroundTransparency = 1,
+		Image = "rbxassetid://1316045217",
+		ImageColor3 = self.Theme.ShadowColor,
+		ImageTransparency = 0.42,
+		ScaleType = Enum.ScaleType.Slice,
+		SliceCenter = Rect.new(10, 10, 118, 118),
+		Size = UDim2.new(1, 42, 1, 42),
+		Position = UDim2.new(0, -21, 0, -21),
+		ZIndex = 0,
+		Parent = Main,
+	})
+
+	local Glow = Utility.CreateInstance("Frame", {
+		Name = "Glow",
+		BackgroundColor3 = self.Theme.PrimaryColor,
+		BackgroundTransparency = 0.88,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 18, 1, 18),
+		Position = UDim2.new(0, -9, 0, -9),
+		ZIndex = 0,
+		Parent = Main,
+	})
+	Utility.MakeCorner(Glow, UDim.new(0, 18))
+
+	local Backdrop = Utility.CreateInstance("Frame", {
+		Name = "Backdrop",
+		BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+		BackgroundTransparency = 0.6,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 1, 0),
+		Parent = Main,
+	})
+	Utility.MakeCorner(Backdrop, UDim.new(0, 14))
+
+	local TopBar = Utility.CreateInstance("Frame", {
+		Name = "TopBar",
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundColor3 = self.Theme.Panel,
+		BackgroundTransparency = 0.12,
+		BorderSizePixel = 0,
+		Parent = Main,
+	})
+	Utility.MakeCorner(TopBar, UDim.new(0, 14))
+
+	local Title = Utility.CreateInstance("TextLabel", {
+		Name = "Title",
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0, 12, 0, 0),
+		Size = UDim2.new(1, -120, 1, 0),
+		Font = Enum.Font.GothamMedium,
+		Text = self.Title,
+		TextColor3 = self.Theme.TextColor,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = TopBar,
+	})
+
+	local Close = Utility.CreateInstance("TextButton", {
+		Name = "Close",
+		BackgroundColor3 = self.Theme.PanelAlt,
+		BackgroundTransparency = 0.12,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(24, 24),
+		Position = UDim2.new(1, -32, 0, 5),
+		Font = Enum.Font.GothamBold,
+		Text = "×",
+		TextColor3 = self.Theme.TextColor,
+		TextSize = 16,
+		AutoButtonColor = false,
+		Parent = TopBar,
+	})
+	Utility.MakeCorner(Close, UDim.new(0, 8))
+
+	local Content = Utility.CreateInstance("Frame", {
+		Name = "Content",
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0, 0, 0, 34),
+		Size = UDim2.new(1, 0, 1, -34),
+		Parent = Main,
+	})
+
+	local Scale = Utility.CreateInstance("UIScale", {Scale = 0.94, Parent = Main})
+
+	self.Gui = ScreenGui
+	self.Main = Main
+	self.Backdrop = Backdrop
+	self.TopBar = TopBar
+	self.TitleLabel = Title
+	self.Content = Content
+	self.Scale = Scale
+	self.Glow = Glow
+	self.Shadow = Shadow
+	self.CloseButton = Close
+
+	Utility.MakeStroke(Main, self.Theme.StrokeColor, 1, 0.35)
+
+	local Blur = Utility.CreateBlur("EvokBlur", 0)
+	self.Blur = Blur
+
+	local function UpdateDrag(input)
+		if not self.Dragging or not self.CanDrag then return end
+		local delta = input.Position - self.DragStart
+		Main.Position = UDim2.new(
+			self.StartPos.X.Scale,
+			self.StartPos.X.Offset + delta.X,
+			self.StartPos.Y.Scale,
+			self.StartPos.Y.Offset + delta.Y
+		)
+	end
+
+	self.Maid:Give(TopBar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			self.Dragging = true
+			self.DragStart = input.Position
+			self.StartPos = Main.Position
+		end
+	end))
+
+	self.Maid:Give(TopBar.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			self.Dragging = false
+		end
+	end))
+
+	self.Maid:Give(UserInputService.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			UpdateDrag(input)
+		end
+	end))
+
+	self.Maid:Give(Close.MouseEnter:Connect(function()
+		Utility.TweenObject(Close, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			BackgroundTransparency = 0,
+			TextColor3 = self.Theme.AccentColor
+		})
+	end))
+
+	self.Maid:Give(Close.MouseLeave:Connect(function()
+		Utility.TweenObject(Close, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			BackgroundTransparency = 0.12,
+			TextColor3 = self.Theme.TextColor
+		})
+	end))
+
+	self.Maid:Give(Close.Activated:Connect(function()
+		self:ToggleVisibility(false)
+	end))
+
+	ThemeManager:RegisterObject(Main, "BackgroundColor3", "Background")
+	ThemeManager:RegisterObject(TopBar, "BackgroundColor3", "Panel")
+	ThemeManager:RegisterObject(Title, "TextColor3", "TextColor")
+	ThemeManager:RegisterObject(Close, "TextColor3", "TextColor")
+	ThemeManager:RegisterObject(Close, "BackgroundColor3", "PanelAlt")
+	ThemeManager:RegisterObject(Glow, "BackgroundColor3", "PrimaryColor")
+
+	self:Show(true)
+	return self
+end
+
+function WindowManager:UpdateTheme()
+	ThemeManager:ApplyTheme()
+end
+
+function WindowManager:SetBlurAmount(Value)
+	if self.Blur then
+		self.Blur.Size = Value
+	end
+end
+
+function WindowManager:EnableDragging(State)
+	self.CanDrag = State ~= false
+end
+
+function WindowManager:EnableResize(State)
+	self.CanResize = State ~= false
+end
+
+function WindowManager:Show(Instant)
+	self.Visible = true
+	self.Gui.Enabled = true
+
+	if Instant then
+		self.Main.Visible = true
+		self.Scale.Scale = 1
+		self:SetBlurAmount(12)
+		return
+	end
+
+	self.Main.Visible = true
+	self.Scale.Scale = 0.92
+	self.Backdrop.BackgroundTransparency = 1
+	self.Glow.BackgroundTransparency = 0.95
+	self:SetBlurAmount(0)
+
+	Utility.TweenObject(self.Scale, TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Scale = 1
+	})
+
+	Utility.TweenObject(self.Backdrop, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		BackgroundTransparency = 0.58
+	})
+
+	Utility.TweenObject(self.Glow, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+		BackgroundTransparency = 0.82
+	})
+
+	Utility.TweenObject(self.Blur, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = 12
+	})
+end
+
+function WindowManager:Hide(Instant)
+	self.Visible = false
+
+	if Instant then
+		self.Main.Visible = false
+		self.Gui.Enabled = false
+		self:SetBlurAmount(0)
+		return
+	end
+
+	local Tween = Utility.TweenObject(self.Scale, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		Scale = 0.94
+	})
+
+	Utility.TweenObject(self.Backdrop, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		BackgroundTransparency = 1
+	})
+
+	Utility.TweenObject(self.Blur, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		Size = 0
+	})
+
+	Tween.Completed:Connect(function()
+		self.Main.Visible = false
+		self.Gui.Enabled = false
+	end)
+end
+
+function WindowManager:ToggleVisibility(State)
+	if State == nil then
+		State = not self.Visible
+	end
+
+	if State then
+		self:Show(false)
+	else
+		self:Hide(false)
+	end
+end
+
+function WindowManager:SetSize(Size)
+	self.TargetSize = Size
+	Utility.TweenObject(self.Main, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Size = Size
+	})
+end
+
+function WindowManager:SetPosition(Position)
+	self.TargetPosition = Position
+	Utility.TweenObject(self.Main, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Position = Position
+	})
+end
+
+function WindowManager:SetTitle(Text)
+	self.TitleLabel.Text = Text
+end
+
+function WindowManager:PulseGlow()
+	task.spawn(function()
+		while self.Main and self.Main.Parent do
+			Utility.TweenObject(self.Glow, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+				BackgroundTransparency = 0.78
+			})
+			task.wait(1.1)
+			Utility.TweenObject(self.Glow, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+				BackgroundTransparency = 0.88
+			})
+			task.wait(1.1)
+		end
+	end)
+end
+
+function WindowManager:CreateGlow()
+	return self.Glow
+end
+
+function WindowManager:CreateShadow()
+	return self.Shadow
+end
+
+function WindowManager:Destroy()
+	self.Maid:DoCleaning()
+	Utility.DestroyBlur("EvokBlur")
+	if self.Gui then
+		self.Gui:Destroy()
+	end
+end
+
+return WindowManager
+
+-- Evok - Zynn Love You <3
+-- Core/NotificationManager.lua
+
+local Utility = require(script.Parent.Utility)
+local ThemeManager = require(script.Parent.ThemeManager)
+
+local NotificationManager = {}
+NotificationManager.__index = NotificationManager
+NotificationManager.List = {}
+NotificationManager.Container = nil
+
+function NotificationManager:Init(Parent)
+	if self.Container then
+		return
+	end
+
+	local Holder = Utility.CreateInstance("Frame", {
+		Name = "Notifications",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, 0),
+		Parent = Parent,
+	})
+
+	self.Container = Holder
+end
+
+function NotificationManager:_CreateToast(Text, Color, Duration)
+	local Frame = Utility.CreateInstance("Frame", {
+		BackgroundColor3 = Color3.fromRGB(18, 18, 18),
+		BackgroundTransparency = 0.06,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(260, 54),
+		Position = UDim2.new(1, 280, 1, -18),
+		AnchorPoint = Vector2.new(1, 1),
+		Parent = self.Container,
+	})
+
+	Utility.MakeCorner(Frame, UDim.new(0, 12))
+	Utility.MakeStroke(Frame, Color, 1, 0.45)
+
+	local Glow = Utility.CreateInstance("Frame", {
+		BackgroundColor3 = Color,
+		BackgroundTransparency = 0.9,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 10, 1, 10),
+		Position = UDim2.new(0, -5, 0, -5),
+		Parent = Frame,
+	})
+	Utility.MakeCorner(Glow, UDim.new(0, 14))
+
+	local Title = Utility.CreateInstance("TextLabel", {
+		Name = "Title",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, -16, 1, 0),
+		Position = UDim2.new(0, 8, 0, 0),
+		Font = Enum.Font.GothamMedium,
+		Text = Text,
+		TextColor3 = ThemeManager.CurrentTheme.TextColor,
+		TextSize = 13,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = Frame
+	})
+
+	return {
+		Frame = Frame,
+		Glow = Glow,
+		Title = Title,
+		Color = Color,
+		Duration = Duration
+	}
+end
+
+function NotificationManager:_Reflow()
+	for Index, Item in ipairs(self.List) do
+		local TargetY = 1 - (Index * 0.085)
+		Utility.TweenObject(Item.Frame, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+			Position = UDim2.new(1, -18, TargetY, 0)
+		})
+	end
+end
+
+function NotificationManager:Notify(Config)
+	Config = Config or {}
+
+	if not self.Container then
+		return
+	end
+
+	local Text = Config.Text or "Notification"
+	local Duration = Config.Duration or 3
+	local Color = Config.Color or ThemeManager.CurrentTheme.PrimaryColor
+
+	local Item = self:_CreateToast(Text, Color, Duration)
+	table.insert(self.List, Item)
+
+	self:_Reflow()
+
+	Utility.TweenObject(Item.Frame, TweenInfo.new(0.36, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Position = UDim2.new(1, -18, 1 - (#self.List * 0.085), 0)
+	})
+
+	task.delay(Duration, function()
+		if not Item.Frame or not Item.Frame.Parent then
+			return
+		end
+
+		Utility.TweenObject(Item.Frame, TweenInfo.new(0.24, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Position = UDim2.new(1, 280, Item.Frame.Position.Y.Scale, 0),
+			BackgroundTransparency = 1
+		})
+
+		task.delay(0.26, function()
+			if Item.Frame then
+				Item.Frame:Destroy()
+			end
+
+			for Index, Entry in ipairs(self.List) do
+				if Entry == Item then
+					table.remove(self.List, Index)
+					break
+				end
+			end
+
+			self:_Reflow()
+		end)
+	end)
+
+	return Item
+end
+
+function NotificationManager:RemoveNotification(Item)
+	if not Item or not Item.Frame then
+		return
+	end
+
+	Item.Frame:Destroy()
+
+	for Index, Entry in ipairs(self.List) do
+		if Entry == Item then
+			table.remove(self.List, Index)
+			break
+		end
+	end
+
+	self:_Reflow()
+end
+
+function NotificationManager:Clear()
+	for _, Item in ipairs(self.List) do
+		if Item.Frame then
+			Item.Frame:Destroy()
+		end
+	end
+	table.clear(self.List)
+end
+
+return NotificationManager
+
+-- Evok - Zynn Love You <3
+-- Core/Watermark.lua
+
+local Utility = require(script.Parent.Utility)
+
+local Watermark = {}
+Watermark.__index = Watermark
+
+function Watermark.Create(Parent)
+	local self = setmetatable({}, Watermark)
+
+	local Frame = Utility.CreateInstance("Frame", {
+		Name = "Watermark",
+		BackgroundColor3 = Color3.fromRGB(12, 12, 12),
+		BackgroundTransparency = 0.14,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(280, 26),
+		Position = UDim2.new(0, 12, 0, 10),
+		Parent = Parent
+	})
+
+	Utility.MakeCorner(Frame, UDim.new(0, 8))
+	Utility.MakeStroke(Frame, Color3.fromRGB(120, 70, 180), 1, 0.55)
+
+	local Label = Utility.CreateInstance("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, -10, 1, 0),
+		Position = UDim2.new(0, 5, 0, 0),
+		Font = Enum.Font.GothamMedium,
+		Text = "Evok - Zynn Love You <3 | FPS: -- | Ping: -- | Memory: -- | --:--:--",
+		TextColor3 = Color3.fromRGB(245, 245, 245),
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = Frame
+	})
+
+	self.Frame = Frame
+	self.Label = Label
+	self._alive = true
+
+	task.spawn(function()
+		while self._alive and self.Frame and self.Frame.Parent do
+			local FPS = math.floor(1 / math.max(task.wait(), 1/60))
+			local Ping = math.random(20, 90)
+			local Memory = math.floor(Utility.GetMemoryUsage())
+			self:Update(FPS, Ping, Memory)
+			task.wait(1)
+		end
+	end)
+
+	return self
+end
+
+function Watermark:Update(FPS, Ping, Memory)
+	self.Label.Text = string.format(
+		"Evok - Zynn Love You <3 | FPS: %s | Ping: %s | Memory: %s | %s",
+		FPS or "--",
+		Ping or "--",
+		Memory or "--",
+		Utility.GetTimeString()
+	)
+end
+
+function Watermark:Destroy()
+	self._alive = false
+	if self.Frame then
+		self.Frame:Destroy()
+	end
+end
+
+return Watermark
+
+-- Evok - Zynn Love You <3
+-- Core/Loader.lua
+
+local Utility = require(script.Parent.Utility)
+local ThemeManager = require(script.Parent.ThemeManager)
+local WindowManager = require(script.Parent.WindowManager)
+local NotificationManager = require(script.Parent.NotificationManager)
+local Watermark = require(script.Parent.Watermark)
+
+local Loader = {}
+Loader.__index = Loader
+
+function Loader.Initialize(Config)
+	Config = Config or {}
+
+	local Window = WindowManager.CreateWindow({
+		Parent = Config.Parent,
+		Title = Config.Title or "Evok - Zynn Love You <3",
+		Size = Config.Size,
+		Position = Config.Position,
+	})
+
+	NotificationManager:Init(Window.Gui)
+	local Mark = Watermark.Create(Window.Gui)
+
+	local API = {}
+
+	function API:GetWindow()
+		return Window
+	end
+
+	function API:SetTheme(ThemeName)
+		ThemeManager:SetTheme(ThemeName)
+	end
+
+	function API:SetAccent(Color)
+		ThemeManager:UpdateAccent(Color)
+	end
+
+	function API:Notify(Data)
+		return NotificationManager:Notify(Data)
+	end
+
+	function API:Toggle()
+		Window:ToggleVisibility()
+	end
+
+	function API:Show()
+		Window:Show(false)
+	end
+
+	function API:Hide()
+		Window:Hide(false)
+	end
+
+	function API:Destroy()
+		Mark:Destroy()
+		Window:Destroy()
+		NotificationManager:Clear()
+	end
+
+	return {
+		Window = Window,
+		ThemeManager = ThemeManager,
+		Utility = Utility,
+		Notify = function(_, ...)
+			return NotificationManager:Notify(...)
+		end,
+		Watermark = Mark,
+		API = API
+	}
+end
+
+return Loader
