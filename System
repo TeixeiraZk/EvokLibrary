@@ -1,804 +1,1436 @@
--- ==============================================================================
--- ⚙️ EVOK UI LIBRARY - PART 4: SYSTEMS ENGINE (System.lua)
--- Version: 5.0.0 | Developer: Senior UI/UX Engineer (Evok)
--- Build: Advanced Structural Systems | 800+ Lines Guaranteed
--- ==============================================================================
+--[[
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                    EVOK UI LIBRARY                           ║
+    ║   PART 4: SYSTEMS                                            ║
+    ║   - ConfigSystem                                             ║
+    ║   - SearchBar                                                ║
+    ║   - PlayerList                                               ║
+    ║   - ProfileManager                                           ║
+    ║                                                              ║
+    ║   PART 5: VISUALS API                                        ║
+    ║   - AcrylicBlur                                              ║
+    ║   - ScriptViewer                                             ║
+    ║   - UnloadManager                                            ║
+    ║   - ExternalAPI                                              ║
+    ║                                                              ║
+    ║   MAIN.LUA - Full Usage Example                              ║
+    ╚══════════════════════════════════════════════════════════════╝
+]]
 
-local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
+local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
-local CoreGui = game:GetService("CoreGui")
-local TextService = game:GetService("TextService")
+local RunService       = game:GetService("RunService")
+local Players          = game:GetService("Players")
+local HttpService      = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
 
--- ==============================================================================
--- 📐 LUAU TYPES & SYSTEM ARCHITECTURE DEFINITIONS
--- ==============================================================================
-export type RegistryEntry = {
-    ID: string,
-    Tab: any,
-    Section: any,
-    Instance: GuiObject,
-    Type: string,
-    SaveCallback: () -> any,
-    LoadCallback: (any) -> void
+-- Forward-declare Core for standalone use
+local Utility = {}
+
+-- Minimal inline Utility (for when loaded standalone)
+function Utility.Create(class, props)
+    local inst = Instance.new(class)
+    for k, v in pairs(props or {}) do
+        if k ~= "Parent" then inst[k] = v end
+    end
+    if props and props.Parent then inst.Parent = props.Parent end
+    return inst
+end
+
+function Utility.TweenObject(instance, props, dur, style, dir)
+    style = style or Enum.EasingStyle.Quad
+    dir   = dir   or Enum.EasingDirection.Out
+    local tween = TweenService:Create(instance, TweenInfo.new(dur, style, dir), props)
+    tween:Play()
+    return tween
+end
+
+function Utility.DeepCopy(orig)
+    local copy = {}
+    for k, v in pairs(orig) do
+        copy[k] = type(v) == "table" and Utility.DeepCopy(v) or v
+    end
+    return copy
+end
+
+function Utility.GenerateID()
+    return HttpService:GenerateGUID(false)
+end
+
+function Utility.HexToColor3(hex)
+    hex = hex:gsub("#", "")
+    return Color3.new(
+        tonumber(hex:sub(1,2),16)/255,
+        tonumber(hex:sub(3,4),16)/255,
+        tonumber(hex:sub(5,6),16)/255
+    )
+end
+
+local ThemeColors = {
+    Primary      = Utility.HexToColor3("#C77DFF"),
+    Secondary    = Utility.HexToColor3("#9D4EDD"),
+    Accent       = Utility.HexToColor3("#FFB3FF"),
+    Background   = Utility.HexToColor3("#0A0A0A"),
+    Surface      = Utility.HexToColor3("#111111"),
+    SurfaceHover = Utility.HexToColor3("#1A1A1A"),
+    Border       = Utility.HexToColor3("#2A1A3E"),
+    TextPrimary  = Utility.HexToColor3("#FFFFFF"),
+    TextSecondary= Utility.HexToColor3("#AAAAAA"),
+    TextMuted    = Utility.HexToColor3("#666666"),
+    Success      = Utility.HexToColor3("#4CAF50"),
+    Warning      = Utility.HexToColor3("#FF9800"),
+    Error        = Utility.HexToColor3("#F44336"),
+    SectionBg    = Utility.HexToColor3("#0C0C0C"),
+    HeaderBg     = Utility.HexToColor3("#0D0D0D"),
+    DropdownBg   = Utility.HexToColor3("#0F0F0F"),
+    ScrollBar    = Utility.HexToColor3("#2A1A3E"),
 }
 
-export type ProfileMetadata = {
-    Name: string,
-    Created: string,
-    Version: string,
-    WidgetCount: number,
-    Hash: string
-}
-
-local SystemsModule = {
-    Registry = {} :: { [string]: RegistryEntry },
-    ActiveProfiles = {},
-    Connections = {},
-    ESPDrawings = {},
-    Blacklist = {},
-    SearchIndex = {},
-    SelectedSearchIndex = 0,
-    AutoSaveEnabled = false,
-    AutoSaveProfile = "AutoSave",
-    ConfigFolder = "Evok_Profiles",
-    EncryptionKey = 42
-}
-SystemsModule.__index = SystemsModule
-
--- ==============================================================================
--- 🛡️ FILE SYSTEM SAFETY WRAPPERS (Executor Compatibility)
--- ==============================================================================
-local function SafeIsFolder(path: string): boolean
-    local success, result = pcall(function() return isfolder(path) end)
-    return success and result or false
+local function TC(key)
+    return ThemeColors[key] or Color3.new(1, 1, 1)
 end
 
-local function SafeMakeFolder(path: string)
-    pcall(function() makefolder(path) end)
-end
+--// ============================================================
+--// PART 4: CONFIG SYSTEM
+--// Save, load, delete configs using writefile/readfile
+--// ============================================================
 
-local function SafeWriteFile(path: string, content: string)
-    pcall(function() writefile(path, content) end)
-end
+local ConfigSystem = {}
+ConfigSystem.__index = ConfigSystem
+ConfigSystem._folder     = "EvokConfigs"
+ConfigSystem._profiles   = {}
+ConfigSystem._components = {}
+ConfigSystem._autoLoad   = false
+ConfigSystem._currentProfile = "default"
 
-local function SafeReadFile(path: string): string
-    local success, result = pcall(function() return readfile(path) end)
-    return success and result or "{}"
-end
+function ConfigSystem:Init(folderName)
+    self._folder = folderName or "EvokConfigs"
 
-local function SafeIsFile(path: string): boolean
-    local success, result = pcall(function() return isfile(path) end)
-    return success and result or false
-end
-
-local function SafeListFiles(path: string): {string}
-    local success, result = pcall(function() return listfiles(path) end)
-    return success and result or {}
-end
-
-local function SafeDeleteFile(path: string)
-    pcall(function() delfile(path) end)
-end
-
--- ==============================================================================
--- 🧮 UTILITY 1: NATIVE BASE64 & CRYPTO ENGINES
--- ==============================================================================
-local Base64 = {}
-local b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
-function Base64.Encode(data: string): string
-    return ((data:gsub('.', function(x)
-        local r, b = "", x:byte()
-        for i = 8, 1, -1 do r = r .. (b % 2 ^ i - b % 2 ^ (i - 1) > 0 and "1" or "0") end
-        return r
-    end) .. "0000"):gsub('%d%d%d?%d?%d?%d?', function(x)
-        if #x < 6 then return "" end
-        local c = 0
-        for i = 1, 6 do c = c + (x:sub(i, i) == "1" and 2 ^ (6 - i) or 0) end
-        return b64chars:sub(c + 1, c + 1)
-    end) .. ({ "", "==", "=" })[#data % 3 + 1])
-end
-
-function Base64.Decode(data: string): string
-    data = string.gsub(data, '[^' .. b64chars .. '=]', '')
-    return (data:gsub('.', function(x)
-        if x == "=" then return "" end
-        local r, f = "", (b64chars:find(x) - 1)
-        for i = 6, 1, -1 do r = r .. (f % 2 ^ i - f % 2 ^ (i - 1) > 0 and "1" or "0") end
-        return r
-    end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
-        if #x ~= 8 then return "" end
-        local c = 0
-        for i = 1, 8 do c = c + (x:sub(i, i) == "1" and 2 ^ (8 - i) or 0) end
-        return string.char(c)
-    end))
-end
-
-local function XorCipher(data: string, key: number): string
-    local output = {}
-    for i = 1, #data do
-        local byte = string.byte(data, i)
-        table.insert(output, string.char(bit32.bxor(byte, key)))
+    -- Create folder if it doesn't exist
+    if not isfolder(self._folder) then
+        makefolder(self._folder)
     end
-    return table.concat(output)
-end
-
--- ==============================================================================
--- 🧮 UTILITY 2: STRING MATH & LEVENSHTEIN DISTANCE
--- ==============================================================================
-local function CalculateDistance(s1: string, s2: string): number
-    local len1, len2 = #s1, #s2
-    local matrix = {}
-    
-    for i = 0, len1 do matrix[i] = {[0] = i} end
-    for j = 0, len2 do matrix[0][j] = j end
-    
-    for i = 1, len1 do
-        for j = 1, len2 do
-            local cost = (s1:sub(i, i) == s2:sub(j, j)) and 0 or 1
-            matrix[i][j] = math.min(
-                matrix[i - 1][j] + 1,     
-                matrix[i][j - 1] + 1,     
-                matrix[i - 1][j - 1] + cost 
-            )
-        end
+    if not isfolder(self._folder .. "/Profiles") then
+        makefolder(self._folder .. "/Profiles")
     end
-    return matrix[len1][len2]
 end
 
-local function PerformFuzzySearch(query: string, text: string): (boolean, number)
-    query, text = query:lower(), text:lower()
-    if query == "" then return true, 0 end
-    if text == query then return true, 0 end
-    
-    local foundIndex = string.find(text, query, 1, true)
-    if foundIndex then return true, foundIndex end
-    
-    local distance = CalculateDistance(query, text)
-    local threshold = math.clamp(math.floor(#query * 0.4), 1, 4)
-    
-    if distance <= threshold then return true, distance + 10 end
-    return false, 999
+function ConfigSystem:RegisterComponent(id, component, serializeFn, deserializeFn)
+    self._components[id] = {
+        Component     = component,
+        Serialize     = serializeFn,
+        Deserialize   = deserializeFn,
+    }
 end
 
-local function SplitString(str: string, sep: string): {string}
-    if sep == nil then sep = "%s" end
-    local t = {}
-    for s in string.gmatch(str, "([^" .. sep .. "]+)") do table.insert(t, s) end
-    return t
+-- Register a Toggle
+function ConfigSystem:RegisterToggle(id, toggle)
+    self:RegisterComponent(id, toggle,
+        function() return toggle:GetState() end,
+        function(val) toggle:SetState(val, true) end
+    )
 end
 
--- ==============================================================================
--- 💉 INJECTION SYSTEM (Conecta com a UI principal)
--- ==============================================================================
-function SystemsModule.Inject(WindowInstance)
-    local Core = WindowInstance.Core
-    
-    if not SafeIsFolder(SystemsModule.ConfigFolder) then
-        SafeMakeFolder(SystemsModule.ConfigFolder)
-    end
+-- Register a Slider
+function ConfigSystem:RegisterSlider(id, slider)
+    self:RegisterComponent(id, slider,
+        function() return slider:GetValue() end,
+        function(val) slider:SetValue(val, true) end
+    )
+end
 
-    function WindowInstance:RegisterWidget(config: RegistryEntry)
-        if not config.ID or SystemsModule.Registry[config.ID] then 
-            Core.Logger:Warn("Widget registration skip or crash on ID: " .. tostring(config.ID))
-            return 
-        end
-        SystemsModule.Registry[config.ID] = config
-    end
+-- Register a Dropdown
+function ConfigSystem:RegisterDropdown(id, dropdown)
+    self:RegisterComponent(id, dropdown,
+        function() return dropdown:GetSelected() end,
+        function(val) if val then dropdown:SelectOption(val, true) end end
+    )
+end
 
-    -- ==============================================================================
-    -- 🔍 SYSTEM 1: FUZZY SEARCH ENGINE 3.0 (Arrow Navigation & RichText Highlights)
-    -- ==============================================================================
-    function WindowInstance:CreateGlobalSearch()
-        local TopBar = WindowInstance.MainFrame:WaitForChild("TopBar")
-        
-        local SearchFrame = Instance.new("Frame")
-        SearchFrame.Name = "GlobalSearch"
-        SearchFrame.Size = UDim2.new(0, 180, 0, 24)
-        SearchFrame.Position = UDim2.new(1, -195, 0, 8)
-        SearchFrame.BackgroundColor3 = Core.Themes.Container
-        SearchFrame.Parent = TopBar
-        
-        local Corner = Instance.new("UICorner")
-        Corner.CornerRadius = UDim.new(0, 4)
-        Corner.Parent = SearchFrame
-        
-        local Stroke = Instance.new("UIStroke")
-        Stroke.Color = Core.Themes.Border
-        Stroke.Thickness = 1
-        Stroke.Parent = SearchFrame
-
-        local Icon = Instance.new("TextLabel")
-        Icon.Size = UDim2.new(0, 24, 1, 0)
-        Icon.BackgroundTransparency = 1
-        Icon.Text = "🔍"
-        Icon.TextColor3 = Core.Themes.TextMuted
-        Icon.TextSize = 11
-        Icon.Font = Enum.Font.Gotham
-        Icon.Parent = SearchFrame
-
-        local Input = Instance.new("TextBox")
-        Input.Size = UDim2.new(1, -30, 1, 0)
-        Input.Position = UDim2.new(0, 26, 0, 0)
-        Input.BackgroundTransparency = 1
-        Input.Text = ""
-        Input.PlaceholderText = "Search features..."
-        Input.TextColor3 = Core.Themes.Text
-        Input.PlaceholderColor3 = Core.Themes.TextMuted
-        Input.Font = Enum.Font.Gotham
-        Input.TextSize = 12
-        Input.TextXAlignment = Enum.TextXAlignment.Left
-        Input.ClearTextOnFocus = false
-        Input.Parent = SearchFrame
-
-        -- Dropdown de Resultados Suspensos Nativos
-        local DropdownResults = Instance.new("Frame")
-        DropdownResults.Name = "SearchResults"
-        DropdownResults.Size = UDim2.new(1, 0, 0, 0)
-        DropdownResults.Position = UDim2.new(0, 0, 1, 4)
-        DropdownResults.BackgroundColor3 = Core.Themes.Container
-        DropdownResults.ClipsDescendants = true
-        DropdownResults.ZIndex = 1000
-        DropdownResults.Parent = SearchFrame
-        Instance.new("UICorner", DropdownResults).CornerRadius = UDim.new(0, 4)
-        local Dropstroke = Instance.new("UIStroke", DropdownResults)
-        Dropstroke.Color = Core.Themes.Border
-
-        local Scroll = Instance.new("ScrollingFrame")
-        Scroll.Size = UDim2.new(1, 0, 1, 0)
-        Scroll.BackgroundTransparency = 1
-        Scroll.ScrollBarThickness = 2
-        Scroll.ScrollBarImageColor3 = Core.Themes.Border
-        Scroll.ZIndex = 1001
-        Scroll.Parent = DropdownResults
-
-        local ScrollLayout = Instance.new("UIListLayout", Scroll)
-        ScrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-        local function ClearList()
-            for _, c in pairs(Scroll:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
-            table.clear(SystemsModule.SearchIndex)
-            SystemsModule.SelectedSearchIndex = 0
-        end
-
-        local function UpdateHighlight(btn, active)
-            if active then
-                Core:Tween(btn, {BackgroundColor3 = Core.Themes.Accent, BackgroundTransparency = 0.2}, 0.1)
-                btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            else
-                Core:Tween(btn, {BackgroundTransparency = 1}, 0.1)
-                btn.TextColor3 = Core.Themes.Text
+-- Register a MultiDropdown
+function ConfigSystem:RegisterMultiDropdown(id, multiDrop)
+    self:RegisterComponent(id, multiDrop,
+        function() return multiDrop:GetSelected() end,
+        function(val)
+            multiDrop._selectedSet = {}
+            multiDrop._selected = val or {}
+            for _, v in ipairs(multiDrop._selected) do
+                multiDrop._selectedSet[v] = true
             end
         end
+    )
+end
 
-        Input:GetPropertyChangedSignal("Text"):Connect(function()
-            local query = Input.Text:gsub("^%s+", ""):gsub("%s+$", "")
-            ClearList()
-
-            if query == "" or #query < 2 then
-                Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
-                return
+-- Register a ColorPicker
+function ConfigSystem:RegisterColorPicker(id, picker)
+    self:RegisterComponent(id, picker,
+        function()
+            local c = picker:GetColor()
+            return { R = c.R, G = c.G, B = c.B, A = picker:GetAlpha() }
+        end,
+        function(val)
+            if val then
+                picker:SetColor(Color3.new(val.R, val.G, val.B), true)
             end
+        end
+    )
+end
 
-            local matched = {}
-            for id, entry in pairs(SystemsModule.Registry) do
-                local success, score = PerformFuzzySearch(query, id)
-                if success then table.insert(matched, {ID = id, Entry = entry, Score = score}) end
+-- Register a Keybind
+function ConfigSystem:RegisterKeybind(id, keybind)
+    self:RegisterComponent(id, keybind,
+        function()
+            local key = keybind:GetKeybind()
+            return key and key.Name or "None"
+        end,
+        function(val)
+            if val and val ~= "None" then
+                local ok, kc = pcall(function()
+                    return Enum.KeyCode[val]
+                end)
+                if ok then keybind:SetKeybind(kc) end
             end
+        end
+    )
+end
 
-            table.sort(matched, function(a, b) return a.Score < b.Score end)
+function ConfigSystem:_Serialize()
+    local data = {}
+    for id, comp in pairs(self._components) do
+        local ok, val = pcall(comp.Serialize)
+        if ok then
+            data[id] = val
+        end
+    end
+    return data
+end
 
-            if #matched == 0 then
-                Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
-                return
+function ConfigSystem:_Deserialize(data)
+    for id, val in pairs(data) do
+        if self._components[id] then
+            local ok, err = pcall(self._components[id].Deserialize, val)
+            if not ok then
+                warn("[ConfigSystem] Failed to deserialize: " .. id .. " -> " .. tostring(err))
             end
+        end
+    end
+end
 
-            for i = 1, math.min(#matched, 5) do
-                local item = matched[i]
-                
-                local ResBtn = Instance.new("TextButton")
-                ResBtn.Size = UDim2.new(1, 0, 0, 24)
-                ResBtn.BackgroundTransparency = 1
-                ResBtn.Font = Enum.Font.Gotham
-                ResBtn.TextSize = 11
-                ResBtn.TextXAlignment = Enum.TextXAlignment.Left
-                ResBtn.ZIndex = 1002
-                ResBtn.Parent = Scroll
-                
-                -- Parser RichText para destacar o termo buscado
-                ResBtn.RichText = true
-                local startIdx, endIdx = item.ID:lower():find(query:lower())
-                if startIdx then
-                    local p1 = item.ID:sub(1, startIdx - 1)
-                    local p2 = item.ID:sub(startIdx, endIdx)
-                    local p3 = item.ID:sub(endIdx + 1)
-                    ResBtn.Text = string.format("  %s<b><font color='%s'>%s</font></b>%s", p1, Core.Math.Color.ToHex(Core.Themes.Accent), p2, p3)
-                else
-                    ResBtn.Text = "  " .. item.ID
-                end
+function ConfigSystem:SaveConfig(name)
+    name = name or self._currentProfile
+    self._currentProfile = name
 
-                table.insert(SystemsModule.SearchIndex, {Btn = ResBtn, Entry = item.Entry})
+    local data = self:_Serialize()
+    local encoded = HttpService:JSONEncode(data)
+    local path = self._folder .. "/Profiles/" .. name .. ".json"
 
-                local function ExecuteNavigation()
-                    Input.Text = ""
-                    Input:ReleaseFocus()
-                    Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
+    writefile(path, encoded)
+    return true
+end
 
-                    -- Força viagem de abas
-                    for _, tab in pairs(WindowInstance.Tabs) do
-                        tab.Page.Visible = false
-                        Core:Tween(tab.Btn, {TextColor3 = Core.Themes.TextMuted}, 0.2)
-                        if tab.Page.Name == item.Entry.Tab.Page.Name then
-                            tab.Page.Visible = true
-                            Core:Tween(tab.Btn, {TextColor3 = Core.Themes.Accent}, 0.2)
-                            WindowInstance.CurrentTab = tab
-                        end
-                    end
+function ConfigSystem:LoadConfig(name)
+    name = name or self._currentProfile
+    self._currentProfile = name
 
-                    -- Efeito visual de piscada no componente (Highlight Flash)
-                    task.spawn(function()
-                        local ref = item.Entry.Instance
-                        if ref and ref:IsA("GuiObject") then
-                            local oldColor = ref.BackgroundColor3
-                            for k = 1, 3 do
-                                ref.BackgroundColor3 = Core.Themes.Accent
-                                task.wait(0.15)
-                                ref.BackgroundColor3 = oldColor
-                                task.wait(0.15)
-                            end
-                        end
-                    end)
-                end
-
-                ResBtn.MouseButton1Click:Connect(ExecuteNavigation)
-            end
-
-            local calculatedHeight = math.min(#SystemsModule.SearchIndex * 24, 120)
-            Scroll.CanvasSize = UDim2.new(0, 0, 0, #SystemsModule.SearchIndex * 24)
-            Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, calculatedHeight)}, 0.2, Enum.EasingStyle.Quint)
-        end)
-
-        -- Escuta de navegação via setas direcionais do teclado
-        Input.Focused:Connect(function()
-            Core:Tween(Stroke, {Color = Core.Themes.Accent}, 0.2)
-            local navConn = UserInputService.InputBegan:Connect(function(input, gpe)
-                if #SystemsModule.SearchIndex == 0 then return end
-                
-                if input.KeyCode == Enum.KeyCode.Down then
-                    if SystemsModule.SelectedSearchIndex > 0 then
-                        UpdateHighlight(SystemsModule.SearchIndex[SystemsModule.SelectedSearchIndex].Btn, false)
-                    end
-                    SystemsModule.SelectedSearchIndex = (SystemsModule.SelectedSearchIndex >= #SystemsModule.SearchIndex) and 1 or SystemsModule.SelectedSearchIndex + 1
-                    UpdateHighlight(SystemsModule.SearchIndex[SystemsModule.SelectedSearchIndex].Btn, true)
-                elseif input.KeyCode == Enum.KeyCode.Up then
-                    if SystemsModule.SelectedSearchIndex > 0 then
-                        UpdateHighlight(SystemsModule.SearchIndex[SystemsModule.SelectedSearchIndex].Btn, false)
-                    end
-                    SystemsModule.SelectedSearchIndex = (SystemsModule.SelectedSearchIndex <= 1) and #SystemsModule.SearchIndex or SystemsModule.SelectedSearchIndex - 1
-                    UpdateHighlight(SystemsModule.SearchIndex[SystemsModule.SelectedSearchIndex].Btn, true)
-                elseif input.KeyCode == Enum.KeyCode.Return and SystemsModule.SelectedSearchIndex > 0 then
-                    local target = SystemsModule.SearchIndex[SystemsModule.SelectedSearchIndex]
-                    if target then
-                        -- Força o clique programático
-                        Input.Text = ""
-                        Input:ReleaseFocus()
-                        Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
-                        for _, tab in pairs(WindowInstance.Tabs) do
-                            tab.Page.Visible = false
-                            if tab.Page.Name == target.Entry.Tab.Page.Name then
-                                tab.Page.Visible = true
-                                WindowInstance.CurrentTab = tab
-                            end
-                        end
-                    end
-                end
-            end)
-            
-            local focusLostConn; focusLostConn = Input.FocusLost:Connect(function()
-                navConn:Disconnect()
-                focusLostConn:Disconnect()
-                task.wait(0.15)
-                Core:Tween(DropdownResults, {Size = UDim2.new(1, 0, 0, 0)}, 0.2)
-            end)
-        end)
-
-        Core:SubscribeToTheme(function(theme)
-            SearchFrame.BackgroundColor3 = theme.Container
-            Stroke.Color = theme.Border
-            Input.TextColor3 = theme.Text
-            Input.PlaceholderColor3 = theme.TextMuted
-            DropdownResults.BackgroundColor3 = theme.Container
-            Dropstroke.Color = theme.Border
-            Scroll.ScrollBarImageColor3 = theme.Border
-        end)
+    local path = self._folder .. "/Profiles/" .. name .. ".json"
+    if not isfile(path) then
+        return false, "Config not found: " .. name
     end
 
-    -- ==============================================================================
-    -- 💾 SYSTEM 2: ADVANCED PROFILE ENGINE (Crypto, AutoSave & Flattening)
-    -- ==============================================================================
-    local ProfileManager = {}
+    local ok, content = pcall(readfile, path)
+    if not ok then return false, "Failed to read file" end
 
-    function ProfileManager:GetProfiles(): {string}
-        local files = SafeListFiles(SystemsModule.ConfigFolder)
-        local profiles = {}
-        for _, file in ipairs(files) do
-            if file:match("%.json$") then
-                local name = file:match("([^/%\\]+)%.json$")
-                if name then table.insert(profiles, name) end
-            end
-        end
-        return profiles
+    local ok2, data = pcall(HttpService.JSONDecode, HttpService, content)
+    if not ok2 then return false, "Failed to decode JSON" end
+
+    self:_Deserialize(data)
+    return true
+end
+
+function ConfigSystem:DeleteConfig(name)
+    local path = self._folder .. "/Profiles/" .. name .. ".json"
+    if isfile(path) then
+        delfile(path)
+        return true
     end
+    return false
+end
 
-    function ProfileManager:GenerateIntegrityHash(dataString: string): string
-        local hash = 0
-        for i = 1, #dataString do
-            hash = (hash * 31 + string.byte(dataString, i)) % 2^32
+function ConfigSystem:ListConfigs()
+    local path = self._folder .. "/Profiles/"
+    local files = {}
+    if isfolder(path) then
+        local list = listfiles(path)
+        for _, f in ipairs(list) do
+            local name = f:gsub(path, ""):gsub("%.json$", "")
+            table.insert(files, name)
         end
-        return string.format("%X", hash)
     end
+    return files
+end
 
-    function ProfileManager:Save(profileName: string)
-        local runtimeData = {}
-        for id, widget in pairs(SystemsModule.Registry) do
-            if widget.SaveCallback then
-                local success, stateValue = pcall(widget.SaveCallback)
-                if success and stateValue ~= nil then
-                    runtimeData[id] = stateValue
-                end
-            end
-        end
-
-        local rawPayload = HttpService:JSONEncode(runtimeData)
-        local encryptedPayload = Base64.Encode(XorCipher(rawPayload, SystemsModule.EncryptionKey))
-        
-        local package: ProfileMetadata = {
-            Name = profileName,
-            Created = os.date("%Y-%m-%d %H:%M:%S"),
-            Version = "5.0.0",
-            WidgetCount = table.create(#runtimeData),
-            Hash = self:GenerateIntegrityHash(encryptedPayload)
-        }
-
-        local finalWrapper = HttpService:JSONEncode({
-            Envelope = package,
-            Payload = encryptedPayload
-        })
-
-        local path = SystemsModule.ConfigFolder .. "/" .. profileName .. ".json"
-        SafeWriteFile(path, finalWrapper)
-        Core:Notify({Title = "Profile Engine", Text = "Configuration '" .. profileName .. "' synchronized.", Type = "Success", Duration = 3})
+function ConfigSystem:AutoLoad(name)
+    local ok = self:LoadConfig(name)
+    if not ok then
+        warn("[ConfigSystem] AutoLoad: no config found for " .. tostring(name))
     end
+end
 
-    function ProfileManager:Load(profileName: string)
-        local path = SystemsModule.ConfigFolder .. "/" .. profileName .. ".json"
-        if not SafeIsFile(path) then return end
-
-        local fileContent = SafeReadFile(path)
-        local success, rootTable = pcall(function() return HttpService:JSONDecode(fileContent) end)
-        
-        if not success or type(rootTable) ~= "table" or not rootTable.Envelope or not rootTable.Payload then
-            Core:Notify({Title = "Profile Error", Text = "Failed to parse profile manifest.", Type = "Error", Duration = 4})
-            return
-        end
-
-        -- Verificação de integridade antifalsificação de hash
-        local currentHash = self:GenerateIntegrityHash(rootTable.Payload)
-        if currentHash ~= rootTable.Envelope.Hash then
-            Core:Notify({Title = "Profile Refused", Text = "File corruption detected (Hash mismatch).", Type = "Error", Duration = 4})
-            return
-        end
-
-        local decryptedRaw = XorCipher(Base64.Decode(rootTable.Payload), SystemsModule.EncryptionKey)
-        local parsingSuccess, stateData = pcall(function() return HttpService:JSONDecode(decryptedRaw) end)
-
-        if not parsingSuccess or type(stateData) ~= "table" then return end
-
-        for id, val in pairs(stateData) do
-            local widget = SystemsModule.Registry[id]
-            if widget and widget.LoadCallback then
-                pcall(function() widget.LoadCallback(val) end)
-            end
-        end
-        Core:Notify({Title = "Profile Loaded", Text = "Active configurations updated to match '" .. profileName .. "'.", Type = "Success", Duration = 3})
+function ConfigSystem:ResetAll()
+    -- Call each component's deserialize with nil (components should handle reset themselves)
+    for id, comp in pairs(self._components) do
+        pcall(comp.Deserialize, nil)
     end
+end
 
-    -- Linha de execução assíncrona p/ Auto-Save thread
-    task.spawn(function()
-        while task.wait(30) do
-            if SystemsModule.AutoSaveEnabled then
-                ProfileManager:Save(SystemsModule.AutoSaveProfile)
-                Core.Logger:Log("Background Auto-Save loop triggered.")
-            end
+--// ============================================================
+--// SEARCH BAR
+--// ============================================================
+
+local SearchBar = {}
+SearchBar.__index = SearchBar
+
+function SearchBar.new(parentFrame, options)
+    local self = setmetatable({}, SearchBar)
+    options = options or {}
+
+    self._items       = {}
+    self._placeholder = options.Placeholder or "Search widgets..."
+    self._visible     = false
+
+    -- Search frame
+    local frame = Utility.Create("Frame", {
+        Name = "SearchBar",
+        Size = UDim2.new(1, 0, 0, 28),
+        Position = UDim2.new(0, 0, 1, -36),
+        BackgroundColor3 = TC("SectionBg"),
+        BackgroundTransparency = 0.1,
+        BorderSizePixel = 0,
+        Visible = false,
+        ZIndex = 20,
+        Parent = parentFrame,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = frame })
+    Utility.Create("UIStroke", {
+        Color = TC("Border"),
+        Thickness = 1,
+        Transparency = 0.3,
+        Parent = frame,
+    })
+
+    local searchIcon = Utility.Create("TextLabel", {
+        Size = UDim2.new(0, 24, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "🔍",
+        TextSize = 11,
+        Font = Enum.Font.Gotham,
+        ZIndex = frame.ZIndex + 1,
+        Parent = frame,
+    })
+
+    local inputBox = Utility.Create("TextBox", {
+        Size = UDim2.new(1, -28, 1, 0),
+        Position = UDim2.new(0, 24, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+        PlaceholderText = self._placeholder,
+        TextColor3 = TC("TextPrimary"),
+        PlaceholderColor3 = TC("TextMuted"),
+        TextSize = 11,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ClearTextOnFocus = false,
+        ZIndex = frame.ZIndex + 1,
+        Parent = frame,
+    })
+
+    self._frame    = frame
+    self._inputBox = inputBox
+
+    -- Filter logic
+    inputBox:GetPropertyChangedSignal("Text"):Connect(function()
+        local query = inputBox.Text:lower()
+        self:_Filter(query)
+    end)
+
+    -- Toggle with keyboard shortcut (Ctrl+F)
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == Enum.KeyCode.F and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+            self:Toggle()
+        end
+        if input.KeyCode == Enum.KeyCode.Escape and self._visible then
+            self:Hide()
         end
     end)
 
-    function WindowInstance:CreateConfigManager(tabName: string)
-        local ManagerTab = self:CreateTab(tabName or "Settings")
-        local SecProfiles = ManagerTab:CreateSection("Profiles", "Left")
-        
-        local cache = ProfileManager:GetProfiles()
-        local SelectionDropdown = SecProfiles:CreateDropdown({
-            Name = "Select Profile", Options = cache, Default = cache[1] or "None"
-        })
+    return self
+end
 
-        local NewNameInput = SecProfiles:CreateTextBox({
-            Name = "Name Override", Placeholder = "Profile name...", ClearOnFocus = true
-        })
+function SearchBar:RegisterItem(frame, name)
+    table.insert(self._items, { Frame = frame, Name = name:lower() })
+end
 
-        SecProfiles:CreateToggle({
-            Name = "Enable Background Auto-Save",
-            Default = false,
-            Callback = function(state) SystemsModule.AutoSaveEnabled = state end
-        })
-
-        SecProfiles:CreateButton({
-            Name = "Commit Profile Save", Cooldown = 1,
-            Callback = function()
-                local txt = NewNameInput:GetValue()
-                if txt == "" then txt = SelectionDropdown.Selected end
-                if txt and txt ~= "" and txt ~= "None" then
-                    ProfileManager:Save(txt)
-                    SelectionDropdown:Refresh(ProfileManager:GetProfiles())
-                else
-                    Core:Notify({Title = "Operation Denied", Text = "Provide a structural name string.", Type = "Error"})
-                end
+function SearchBar:_Filter(query)
+    if query == "" then
+        for _, item in ipairs(self._items) do
+            if item.Frame and item.Frame.Parent then
+                Utility.TweenObject(item.Frame, { BackgroundTransparency = 1 }, 0.1)
+                item.Frame.Visible = true
             end
+        end
+        return
+    end
+
+    for _, item in ipairs(self._items) do
+        if item.Frame and item.Frame.Parent then
+            local matches = item.Name:find(query, 1, true)
+            if matches then
+                item.Frame.Visible = true
+                Utility.TweenObject(item.Frame, { BackgroundTransparency = 0 }, 0.1)
+            else
+                Utility.TweenObject(item.Frame, { BackgroundTransparency = 0.8 }, 0.15)
+                task.delay(0.15, function()
+                    if not item.Name:find(self._inputBox.Text:lower(), 1, true) then
+                        item.Frame.Visible = false
+                    end
+                end)
+            end
+        end
+    end
+end
+
+function SearchBar:Show()
+    self._visible = true
+    self._frame.Visible = true
+    self._frame.BackgroundTransparency = 1
+    Utility.TweenObject(self._frame, { BackgroundTransparency = 0.1 }, 0.2)
+    self._inputBox:CaptureFocus()
+end
+
+function SearchBar:Hide()
+    self._visible = false
+    Utility.TweenObject(self._frame, { BackgroundTransparency = 1 }, 0.2)
+    task.delay(0.22, function()
+        self._frame.Visible = false
+    end)
+    self._inputBox:ReleaseFocus()
+    self._inputBox.Text = ""
+    self:_Filter("")
+end
+
+function SearchBar:Toggle()
+    if self._visible then self:Hide() else self:Show() end
+end
+
+--// ============================================================
+--// PLAYER LIST SYSTEM
+--// ============================================================
+
+local PlayerList = {}
+PlayerList.__index = PlayerList
+
+function PlayerList.new(tab, options)
+    local self = setmetatable({}, PlayerList)
+    options = options or {}
+
+    self._onSpectate  = options.OnSpectate  or nil
+    self._onTeleport  = options.OnTeleport  or nil
+    self._onSelect    = options.OnSelect    or nil
+    self._refreshRate = options.RefreshRate or 5
+    self._playerCards = {}
+    self._connection  = nil
+
+    -- Container inside tab content
+    local container = Utility.Create("Frame", {
+        Name = "PlayerListContainer",
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Parent = tab.Content,
+    })
+
+    local layout = Utility.Create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 4),
+        Parent = container,
+    })
+
+    -- Header
+    local header = Utility.Create("Frame", {
+        Name = "PLHeader",
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundColor3 = TC("SectionBg"),
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0,
+        LayoutOrder = 0,
+        Parent = container,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = header })
+
+    local countLabel = Utility.Create("TextLabel", {
+        Size = UDim2.new(1, -20, 1, 0),
+        Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "Players (0)",
+        TextColor3 = TC("Primary"),
+        TextSize = 11,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = header,
+    })
+
+    local refreshBtn = Utility.Create("TextButton", {
+        Size = UDim2.new(0, 56, 0, 18),
+        Position = UDim2.new(1, -62, 0.5, -9),
+        BackgroundColor3 = TC("Surface"),
+        BackgroundTransparency = 0.3,
+        Text = "↻ Refresh",
+        TextColor3 = TC("TextMuted"),
+        TextSize = 9,
+        Font = Enum.Font.Gotham,
+        BorderSizePixel = 0,
+        Parent = header,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = refreshBtn })
+
+    self._container  = container
+    self._countLabel = countLabel
+    self._layout     = layout
+
+    local function buildPlayerCard(player)
+        if self._playerCards[player.Name] then return end
+
+        local card = Utility.Create("Frame", {
+            Name = "Card_" .. player.Name,
+            Size = UDim2.new(1, 0, 0, 34),
+            BackgroundColor3 = TC("Surface"),
+            BackgroundTransparency = 0.25,
+            BorderSizePixel = 0,
+            LayoutOrder = #container:GetChildren(),
+            Parent = container,
+        })
+        Utility.Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = card })
+        Utility.Create("UIStroke", {
+            Color = TC("Border"),
+            Thickness = 1,
+            Transparency = 0.6,
+            Parent = card,
         })
 
-        SecProfiles:CreateButton({
-            Name = "Execute Profile Load", Cooldown = 1,
-            Callback = function()
-                local target = SelectionDropdown.Selected
-                if target and target ~= "None" and target ~= "" then
-                    ProfileManager:Load(target)
-                end
-            end
+        -- Avatar icon placeholder
+        local avatarFrame = Utility.Create("Frame", {
+            Size = UDim2.new(0, 24, 0, 24),
+            Position = UDim2.new(0, 6, 0.5, -12),
+            BackgroundColor3 = TC("Primary"),
+            BackgroundTransparency = 0.5,
+            BorderSizePixel = 0,
+            Parent = card,
+        })
+        Utility.Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = avatarFrame })
+
+        local avatarLabel = Utility.Create("TextLabel", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Text = player.Name:sub(1, 1):upper(),
+            TextColor3 = Color3.new(1, 1, 1),
+            TextSize = 11,
+            Font = Enum.Font.GothamBold,
+            Parent = avatarFrame,
         })
 
-        SecProfiles:CreateButton({
-            Name = "Purge Profile File", Cooldown = 2,
-            Callback = function()
-                local target = SelectionDropdown.Selected
-                if target and target ~= "None" and target ~= "" then
-                    SafeDeleteFile(SystemsModule.ConfigFolder .. "/" .. target .. ".json")
-                    local list = ProfileManager:GetProfiles()
-                    SelectionDropdown:Refresh(list)
-                    SelectionDropdown.Selected = list[1] or "None"
-                end
+        -- Player name
+        local nameLabel = Utility.Create("TextLabel", {
+            Size = UDim2.new(0.4, 0, 0.5, 0),
+            Position = UDim2.new(0, 36, 0, 4),
+            BackgroundTransparency = 1,
+            Text = player.Name,
+            TextColor3 = TC("TextPrimary"),
+            TextSize = 11,
+            Font = Enum.Font.GothamBold,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = card,
+        })
+
+        -- Display name
+        local displayLabel = Utility.Create("TextLabel", {
+            Size = UDim2.new(0.4, 0, 0.5, 0),
+            Position = UDim2.new(0, 36, 0.5, -2),
+            BackgroundTransparency = 1,
+            Text = "@" .. player.DisplayName,
+            TextColor3 = TC("TextMuted"),
+            TextSize = 9,
+            Font = Enum.Font.Gotham,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = card,
+        })
+
+        -- Spectate button
+        local specBtn = Utility.Create("TextButton", {
+            Size = UDim2.new(0, 52, 0, 18),
+            Position = UDim2.new(1, -112, 0.5, -9),
+            BackgroundColor3 = TC("Secondary"),
+            BackgroundTransparency = 0.3,
+            Text = "Spectate",
+            TextColor3 = Color3.new(1, 1, 1),
+            TextSize = 9,
+            Font = Enum.Font.GothamBold,
+            BorderSizePixel = 0,
+            Parent = card,
+        })
+        Utility.Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = specBtn })
+
+        -- Teleport button
+        local tpBtn = Utility.Create("TextButton", {
+            Size = UDim2.new(0, 48, 0, 18),
+            Position = UDim2.new(1, -56, 0.5, -9),
+            BackgroundColor3 = TC("Primary"),
+            BackgroundTransparency = 0.2,
+            Text = "Teleport",
+            TextColor3 = Color3.new(0, 0, 0),
+            TextSize = 9,
+            Font = Enum.Font.GothamBold,
+            BorderSizePixel = 0,
+            Parent = card,
+        })
+        Utility.Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = tpBtn })
+
+        -- Hover effects on card
+        local cardBtn = Utility.Create("TextButton", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Text = "",
+            ZIndex = card.ZIndex - 1,
+            Parent = card,
+        })
+
+        cardBtn.MouseEnter:Connect(function()
+            Utility.TweenObject(card, { BackgroundTransparency = 0.1 }, 0.2)
+        end)
+        cardBtn.MouseLeave:Connect(function()
+            Utility.TweenObject(card, { BackgroundTransparency = 0.25 }, 0.2)
+        end)
+        cardBtn.MouseButton1Click:Connect(function()
+            if self._onSelect then
+                task.spawn(self._onSelect, player)
             end
+        end)
+
+        specBtn.MouseButton1Click:Connect(function()
+            if self._onSpectate then
+                task.spawn(self._onSpectate, player)
+            end
+        end)
+
+        tpBtn.MouseButton1Click:Connect(function()
+            if self._onTeleport then
+                task.spawn(self._onTeleport, player)
+            end
+        end)
+
+        -- Hover on buttons
+        specBtn.MouseEnter:Connect(function()
+            Utility.TweenObject(specBtn, { BackgroundTransparency = 0.1 }, 0.15)
+        end)
+        specBtn.MouseLeave:Connect(function()
+            Utility.TweenObject(specBtn, { BackgroundTransparency = 0.3 }, 0.15)
+        end)
+        tpBtn.MouseEnter:Connect(function()
+            Utility.TweenObject(tpBtn, { BackgroundTransparency = 0.05 }, 0.15)
+        end)
+        tpBtn.MouseLeave:Connect(function()
+            Utility.TweenObject(tpBtn, { BackgroundTransparency = 0.2 }, 0.15)
+        end)
+
+        self._playerCards[player.Name] = card
+    end
+
+    local function removePlayerCard(playerName)
+        if self._playerCards[playerName] then
+            local card = self._playerCards[playerName]
+            Utility.TweenObject(card, { BackgroundTransparency = 1 }, 0.2)
+            task.delay(0.25, function()
+                if card.Parent then card:Destroy() end
+            end)
+            self._playerCards[playerName] = nil
+        end
+    end
+
+    local function refreshList()
+        local playerList = Players:GetPlayers()
+        countLabel.Text = "Players (" .. #playerList .. ")"
+
+        -- Remove cards for players who left
+        for name, _ in pairs(self._playerCards) do
+            local found = false
+            for _, p in ipairs(playerList) do
+                if p.Name == name then found = true break end
+            end
+            if not found then removePlayerCard(name) end
+        end
+
+        -- Add new players
+        for _, player in ipairs(playerList) do
+            if player ~= LocalPlayer then
+                buildPlayerCard(player)
+            end
+        end
+    end
+
+    -- Auto refresh
+    refreshList()
+
+    Players.PlayerAdded:Connect(function(player)
+        task.wait(0.5)
+        refreshList()
+    end)
+
+    Players.PlayerRemoving:Connect(function(player)
+        removePlayerCard(player.Name)
+        countLabel.Text = "Players (" .. (#Players:GetPlayers() - 1) .. ")"
+    end)
+
+    refreshBtn.MouseButton1Click:Connect(function()
+        refreshList()
+        Utility.TweenObject(refreshBtn, { BackgroundTransparency = 0.05 }, 0.1)
+        task.delay(0.2, function()
+            Utility.TweenObject(refreshBtn, { BackgroundTransparency = 0.3 }, 0.2)
+        end)
+    end)
+
+    return self
+end
+
+--// ============================================================
+--// PROFILE MANAGER
+--// ============================================================
+
+local ProfileManager = {}
+ProfileManager.__index = ProfileManager
+
+function ProfileManager.new(tab, configSystem, options)
+    local self = setmetatable({}, ProfileManager)
+    options = options or {}
+
+    self._configSystem = configSystem
+    self._profiles     = {}
+
+    -- Header section
+    local frame = Utility.Create("Frame", {
+        Name = "ProfileManager",
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Parent = tab.Content,
+    })
+
+    Utility.Create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 6),
+        Parent = frame,
+    })
+
+    -- Profile name input
+    local inputRow = Utility.Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        LayoutOrder = 1,
+        Parent = frame,
+    })
+
+    local nameInput = Utility.Create("TextBox", {
+        Size = UDim2.new(1, -68, 1, 0),
+        BackgroundColor3 = TC("Surface"),
+        BackgroundTransparency = 0.2,
+        Text = "",
+        PlaceholderText = "Profile name...",
+        TextColor3 = TC("TextPrimary"),
+        PlaceholderColor3 = TC("TextMuted"),
+        TextSize = 11,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ClearTextOnFocus = false,
+        BorderSizePixel = 0,
+        Parent = inputRow,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = nameInput })
+    Utility.Create("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = nameInput })
+
+    local saveBtn = Utility.Create("TextButton", {
+        Size = UDim2.new(0, 60, 1, 0),
+        Position = UDim2.new(1, -60, 0, 0),
+        BackgroundColor3 = TC("Primary"),
+        BackgroundTransparency = 0.1,
+        Text = "Save",
+        TextColor3 = Color3.new(0, 0, 0),
+        TextSize = 11,
+        Font = Enum.Font.GothamBold,
+        BorderSizePixel = 0,
+        Parent = inputRow,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = saveBtn })
+
+    -- Profiles list
+    local listFrame = Utility.Create("Frame", {
+        Name = "ProfileList",
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        LayoutOrder = 2,
+        Parent = frame,
+    })
+
+    Utility.Create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 4),
+        Parent = listFrame,
+    })
+
+    self._listFrame = listFrame
+    self._nameInput = nameInput
+
+    local function refreshList()
+        for _, child in ipairs(listFrame:GetChildren()) do
+            if child:IsA("Frame") then child:Destroy() end
+        end
+
+        local configs = configSystem:ListConfigs()
+        for i, name in ipairs(configs) do
+            local row = Utility.Create("Frame", {
+                Size = UDim2.new(1, 0, 0, 28),
+                BackgroundColor3 = TC("Surface"),
+                BackgroundTransparency = 0.3,
+                BorderSizePixel = 0,
+                LayoutOrder = i,
+                Parent = listFrame,
+            })
+            Utility.Create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = row })
+
+            local nameL = Utility.Create("TextLabel", {
+                Size = UDim2.new(1, -100, 1, 0),
+                Position = UDim2.new(0, 10, 0, 0),
+                BackgroundTransparency = 1,
+                Text = name,
+                TextColor3 = TC("TextPrimary"),
+                TextSize = 11,
+                Font = Enum.Font.Gotham,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = row,
+            })
+
+            local loadB = Utility.Create("TextButton", {
+                Size = UDim2.new(0, 40, 0, 18),
+                Position = UDim2.new(1, -92, 0.5, -9),
+                BackgroundColor3 = TC("Secondary"),
+                BackgroundTransparency = 0.3,
+                Text = "Load",
+                TextColor3 = Color3.new(1, 1, 1),
+                TextSize = 9,
+                Font = Enum.Font.GothamBold,
+                BorderSizePixel = 0,
+                Parent = row,
+            })
+            Utility.Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = loadB })
+
+            local delB = Utility.Create("TextButton", {
+                Size = UDim2.new(0, 40, 0, 18),
+                Position = UDim2.new(1, -46, 0.5, -9),
+                BackgroundColor3 = Utility.HexToColor3("#F44336"),
+                BackgroundTransparency = 0.3,
+                Text = "Delete",
+                TextColor3 = Color3.new(1, 1, 1),
+                TextSize = 9,
+                Font = Enum.Font.GothamBold,
+                BorderSizePixel = 0,
+                Parent = row,
+            })
+            Utility.Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = delB })
+
+            loadB.MouseButton1Click:Connect(function()
+                configSystem:LoadConfig(name)
+            end)
+
+            delB.MouseButton1Click:Connect(function()
+                configSystem:DeleteConfig(name)
+                refreshList()
+            end)
+        end
+    end
+
+    saveBtn.MouseButton1Click:Connect(function()
+        local name = nameInput.Text
+        if name and name ~= "" then
+            configSystem:SaveConfig(name)
+            nameInput.Text = ""
+            refreshList()
+        end
+    end)
+
+    refreshList()
+    return self
+end
+
+--// ============================================================
+--// PART 5: ACRYLIC BLUR (Simulated)
+--// ============================================================
+
+local AcrylicBlur = {}
+AcrylicBlur.__index = AcrylicBlur
+
+function AcrylicBlur.new(parent, options)
+    local self = setmetatable({}, AcrylicBlur)
+    options = options or {}
+
+    self._opacity  = options.Opacity  or 0.6
+    self._tint     = options.Tint     or TC("Background")
+    self._noise    = options.Noise    ~= false
+
+    -- Base dark layer
+    local blur = Utility.Create("Frame", {
+        Name = "AcrylicBlur",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = self._tint,
+        BackgroundTransparency = 1 - self._opacity,
+        BorderSizePixel = 0,
+        ZIndex = 1,
+        Parent = parent,
+    })
+
+    -- Tint overlay
+    local tint = Utility.Create("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = TC("Primary"),
+        BackgroundTransparency = 0.95,
+        BorderSizePixel = 0,
+        ZIndex = 2,
+        Parent = blur,
+    })
+
+    -- Noise texture simulation using gradient
+    if self._noise then
+        local noiseGrad = Utility.Create("Frame", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundColor3 = Color3.new(1, 1, 1),
+            BackgroundTransparency = 0.98,
+            BorderSizePixel = 0,
+            ZIndex = 3,
+            Parent = blur,
+        })
+        Utility.Create("UIGradient", {
+            Rotation = 45,
+            Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
+                ColorSequenceKeypoint.new(0.5, Color3.new(0, 0, 0)),
+                ColorSequenceKeypoint.new(1, Color3.new(1, 1, 1)),
+            }),
+            Parent = noiseGrad,
         })
     end
 
-    -- ==============================================================================
-    -- 👥 SYSTEM 3: PLAYER MANAGER & RAYCAST OCCLUSION ESP ENGINE
-    -- ==============================================================================
-    local ESPEngine = {
-        Active = false, Boxes = false, Names = false, Health = false, Tracers = false,
-        MaxDistance = 1500, VisibleCheck = true,
-        VisColor = Color3.fromRGB(0, 255, 120), InvisibleColor = Color3.fromRGB(255, 40, 40)
+    -- Highlight stripe
+    local highlight = Utility.Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 1),
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BackgroundTransparency = 0.85,
+        BorderSizePixel = 0,
+        ZIndex = 4,
+        Parent = blur,
+    })
+
+    self._blur = blur
+
+    -- Animate opacity in
+    Utility.TweenObject(blur, { BackgroundTransparency = 1 - self._opacity }, 0.4)
+
+    function self:SetOpacity(opacity)
+        self._opacity = opacity
+        Utility.TweenObject(blur, { BackgroundTransparency = 1 - opacity }, 0.3)
+    end
+
+    function self:SetTint(color)
+        self._tint = color
+        Utility.TweenObject(blur, { BackgroundColor3 = color }, 0.3)
+    end
+
+    return self
+end
+
+--// ============================================================
+--// SCRIPT VIEWER
+--// ============================================================
+
+local ScriptViewer = {}
+ScriptViewer.__index = ScriptViewer
+
+function ScriptViewer.new(tab, options)
+    local self = setmetatable({}, ScriptViewer)
+    options = options or {}
+
+    -- Outer container
+    local container = Utility.Create("Frame", {
+        Name = "ScriptViewer",
+        Size = UDim2.new(1, 0, 0, 300),
+        BackgroundColor3 = Utility.HexToColor3("#080808"),
+        BackgroundTransparency = 0.05,
+        BorderSizePixel = 0,
+        LayoutOrder = #tab.Content:GetChildren(),
+        Parent = tab.Content,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = container })
+    Utility.Create("UIStroke", {
+        Color = TC("Border"),
+        Thickness = 1,
+        Transparency = 0.4,
+        Parent = container,
+    })
+
+    -- Toolbar
+    local toolbar = Utility.Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 26),
+        BackgroundColor3 = Utility.HexToColor3("#0D0D0D"),
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0,
+        Parent = container,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = toolbar })
+    Utility.Create("Frame", {
+        Size = UDim2.new(1, 0, 0.5, 0),
+        Position = UDim2.new(0, 0, 0.5, 0),
+        BackgroundColor3 = Utility.HexToColor3("#0D0D0D"),
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0,
+        Parent = toolbar,
+    })
+
+    local fileLabel = Utility.Create("TextLabel", {
+        Size = UDim2.new(0.5, 0, 1, 0),
+        Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1,
+        Text = options.FileName or "script.lua",
+        TextColor3 = TC("TextMuted"),
+        TextSize = 10,
+        Font = Enum.Font.Code,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = toolbar,
+    })
+
+    -- Syntax colors
+    local syntax = {
+        keyword  = Utility.HexToColor3("#C77DFF"),
+        string   = Utility.HexToColor3("#A8FF78"),
+        number   = Utility.HexToColor3("#FFD080"),
+        comment  = Utility.HexToColor3("#555555"),
+        default  = Utility.HexToColor3("#CCCCCC"),
+        builtin  = Utility.HexToColor3("#7EB8FF"),
     }
 
-    local function CreatePlayerDrawings(plr: Player)
-        if SystemsModule.ESPDrawings[plr.Name] then return end
-        local container = {
-            BoxOutline = Drawing.new("Square"), Box = Drawing.new("Square"),
-            NameLabel = Drawing.new("Text"),
-            HealthBg = Drawing.new("Line"), HealthBar = Drawing.new("Line"),
-            TracerLine = Drawing.new("Line")
-        }
-        container.BoxOutline.Thickness = 3; container.BoxOutline.Filled = false; container.BoxOutline.Color = Color3.new(0,0,0); container.BoxOutline.Transparency = 0.8
-        container.Box.Thickness = 1; container.Box.Filled = false; container.Box.Transparency = 1
-        container.NameLabel.Size = 13; container.NameLabel.Center = true; container.NameLabel.Outline = true; container.NameLabel.Color = Color3.new(1,1,1)
-        container.HealthBg.Thickness = 3; container.HealthBg.Color = Color3.new(0,0,0); container.HealthBg.Transparency = 0.8
-        container.HealthBar.Thickness = 1; container.HealthBar.Transparency = 1
-        container.TracerLine.Thickness = 1; container.TracerLine.Transparency = 0.8
-        
-        SystemsModule.ESPDrawings[plr.Name] = container
+    -- Line numbers + code frame
+    local codeArea = Utility.Create("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 1, -26),
+        Position = UDim2.new(0, 0, 0, 26),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = TC("ScrollBar"),
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        Parent = container,
+    })
+
+    local lineNumFrame = Utility.Create("Frame", {
+        Name = "LineNumbers",
+        Size = UDim2.new(0, 36, 1, 0),
+        BackgroundColor3 = Utility.HexToColor3("#0A0A0A"),
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0,
+        Parent = codeArea,
+    })
+
+    local lineNumLayout = Utility.Create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 0),
+        Parent = lineNumFrame,
+    })
+
+    local codeFrame = Utility.Create("Frame", {
+        Name = "CodeFrame",
+        Size = UDim2.new(1, -40, 1, 0),
+        Position = UDim2.new(0, 40, 0, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Parent = codeArea,
+    })
+
+    local codeLayout = Utility.Create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 0),
+        Parent = codeFrame,
+    })
+
+    self._container = container
+    self._codeArea  = codeArea
+    self._lineNumFrame = lineNumFrame
+    self._codeFrame = codeFrame
+
+    function self:SetScript(code)
+        -- Clear
+        for _, c in ipairs(lineNumFrame:GetChildren()) do
+            if not c:IsA("UIListLayout") then c:Destroy() end
+        end
+        for _, c in ipairs(codeFrame:GetChildren()) do
+            if not c:IsA("UIListLayout") then c:Destroy() end
+        end
+
+        local lines = code:split("\n")
+        for i, line in ipairs(lines) do
+            -- Line number
+            local numLabel = Utility.Create("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 16),
+                BackgroundTransparency = 1,
+                Text = tostring(i),
+                TextColor3 = TC("TextMuted"),
+                TextSize = 10,
+                Font = Enum.Font.Code,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                LayoutOrder = i,
+                Parent = lineNumFrame,
+            })
+            Utility.Create("UIPadding", { PaddingRight = UDim.new(0, 6), Parent = numLabel })
+
+            -- Code line
+            local codeLabel = Utility.Create("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 16),
+                BackgroundTransparency = 1,
+                Text = line == "" and " " or line,
+                TextColor3 = syntax.default,
+                TextSize = 10,
+                Font = Enum.Font.Code,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                RichText = false,
+                LayoutOrder = i,
+                Parent = codeFrame,
+            })
+            Utility.Create("UIPadding", { PaddingLeft = UDim.new(0, 4), Parent = codeLabel })
+
+            -- Basic keyword detection
+            local keywords = {"local", "function", "end", "if", "then", "else", "elseif", "return", "for", "do", "while", "repeat", "until", "break", "true", "false", "nil", "and", "or", "not", "in"}
+            for _, kw in ipairs(keywords) do
+                if line:match("^%s*" .. kw .. "%s") or line:match("%s" .. kw .. "%s") or line:match("^" .. kw .. "$") then
+                    codeLabel.TextColor3 = syntax.keyword
+                    break
+                end
+            end
+
+            -- Comment detection
+            if line:match("^%s*%-%-") then
+                codeLabel.TextColor3 = syntax.comment
+            end
+
+            -- String detection
+            if line:match('"') or line:match("'") or line:match("%[%[") then
+                codeLabel.TextColor3 = syntax.string
+            end
+
+            -- Number detection
+            if line:match("^%s*%d") then
+                codeLabel.TextColor3 = syntax.number
+            end
+        end
     end
 
-    local function ClearPlayerDrawings(plr: Player)
-        local cache = SystemsModule.ESPDrawings[player.Name]
-        if cache then
-            for _, drawing in pairs(cache) do pcall(function() drawing:Remove() end) end
-            SystemsModule.ESPDrawings[player.Name] = nil
-        end
+    if options.Script then
+        self:SetScript(options.Script)
     end
 
-    -- Engine de cálculo vetorial tridimensional acoplado ao pipeline de renderização
-    local renderConn = RunService.RenderStepped:Connect(function()
-        if not ESPEngine.Active then
-            for _, plrsCache in pairs(SystemsModule.ESPDrawings) do
-                for _, d in pairs(plrsCache) do d.Visible = false end
-            end
-            return
+    return self
+end
+
+--// ============================================================
+--// UNLOAD MANAGER
+--// ============================================================
+
+local UnloadManager = {}
+UnloadManager.__index = UnloadManager
+UnloadManager._connections = {}
+UnloadManager._instances   = {}
+UnloadManager._callbacks   = {}
+
+function UnloadManager:Track(connection)
+    table.insert(self._connections, connection)
+    return connection
+end
+
+function UnloadManager:TrackInstance(instance)
+    table.insert(self._instances, instance)
+    return instance
+end
+
+function UnloadManager:OnUnload(fn)
+    table.insert(self._callbacks, fn)
+end
+
+function UnloadManager:DisconnectEvents()
+    for _, conn in ipairs(self._connections) do
+        if typeof(conn) == "RBXScriptConnection" then
+            pcall(function() conn:Disconnect() end)
+        elseif type(conn) == "table" and conn.Disconnect then
+            pcall(function() conn:Disconnect() end)
         end
+    end
+    self._connections = {}
+end
 
-        local localChar = LocalPlayer.Character
-        local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
-        if not localRoot then return end
-
-        for _, plr in ipairs(Players:GetPlayers()) do
-            if plr ~= LocalPlayer and not table.find(SystemsModule.Blacklist, plr.Name) then
-                local data = SystemsModule.ESPDrawings[plr.Name]
-                if not data then CreatePlayerDrawings(plr); data = SystemsModule.ESPDrawings[plr.Name] end
-
-                local char = plr.Character
-                local root = char and char:FindFirstChild("HumanoidRootPart")
-                local hum = char and char:FindFirstChildOfClass("Humanoid")
-                local head = char and char:FindFirstChild("Head")
-
-                if char and root and hum and head and hum.Health > 0 then
-                    local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
-                    local distance = (Camera.CFrame.Position - root.Position).Magnitude
-
-                    if onScreen and distance <= ESPEngine.MaxDistance then
-                        -- Cálculo de Oclusão por Raycast (Wall Check)
-                        local renderColor = ESPEngine.VisColor
-                        if ESPEngine.VisibleCheck then
-                            local params = RaycastParams.new()
-                            params.FilterType = Enum.RaycastFilterType.Exclude
-                            params.FilterDescendantsInstances = {localChar, char}
-                            
-                            local rayResult = Workspace:Raycast(Camera.CFrame.Position, root.Position - Camera.CFrame.Position, params)
-                            if rayResult and rayResult.Instance then
-                                renderColor = ESPEngine.InvisibleColor -- Oculto por geometria sólida
-                            end
-                        end
-
-                        -- Projeção de Escala Euclidiana baseada em distância focal
-                        local topPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 1.6, 0))
-                        local bottomPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
-                        local h = math.abs(topPos.Y - bottomPos.Y)
-                        local w = h * 0.55
-
-                        if ESPEngine.Boxes then
-                            data.BoxOutline.Size = Vector2.new(w, h)
-                            data.BoxOutline.Position = Vector2.new(screenPos.X - w/2, topPos.Y)
-                            data.BoxOutline.Visible = true
-
-                            data.Box.Size = Vector2.new(w, h)
-                            data.Box.Position = Vector2.new(screenPos.X - w/2, topPos.Y)
-                            data.Box.Color = renderColor
-                            data.Box.Visible = true
-                        else
-                            data.BoxOutline.Visible = false; data.Box.Visible = false
-                        end
-
-                        if ESPEngine.Names then
-                            data.NameLabel.Text = string.format("%s (%dm)", plr.DisplayName, math.floor(distance))
-                            data.NameLabel.Position = Vector2.new(screenPos.X, topPos.Y - 18)
-                            data.NameLabel.Visible = true
-                        else
-                            data.NameLabel.Visible = false
-                        end
-
-                        if ESPEngine.Health then
-                            local hpPercent = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
-                            local barHeight = h * hpPercent
-                            
-                            data.HealthBg.From = Vector2.new(screenPos.X - w/2 - 6, topPos.Y)
-                            data.HealthBg.To = Vector2.new(screenPos.X - w/2 - 6, bottomPos.Y)
-                            data.HealthBg.Visible = true
-
-                            data.HealthBar.From = Vector2.new(screenPos.X - w/2 - 6, bottomPos.Y)
-                            data.HealthBar.To = Vector2.new(screenPos.X - w/2 - 6, bottomPos.Y - barHeight)
-                            data.HealthBar.Color = Color3.fromRGB(255, 0, 0):Lerp(Color3.fromRGB(0, 255, 0), hpPercent)
-                            data.HealthBar.Visible = true
-                        else
-                            data.HealthBg.Visible = false; data.HealthBar.Visible = false
-                        end
-
-                        if ESPEngine.Tracers then
-                            data.TracerLine.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                            data.TracerLine.To = Vector2.new(screenPos.X, bottomPos.Y)
-                            data.TracerLine.Color = renderColor
-                            data.TracerLine.Visible = true
-                        else
-                            data.TracerLine.Visible = false
-                        end
-                    else
-                        for _, d in pairs(data) do d.Visible = false end
-                    end
-                else
-                    for _, d in pairs(data) do d.Visible = false end
-                end
-            end
+function UnloadManager:ClearMemory()
+    for _, inst in ipairs(self._instances) do
+        if inst and inst.Parent then
+            pcall(function() inst:Destroy() end)
         end
-    end)
-    table.insert(SystemsModule.Connections, renderConn)
-    Players.PlayerRemoving:Connect(ClearPlayerDrawings)
+    end
+    self._instances = {}
+end
 
-    -- Interface de Gerenciamento do ESP e Controle de Alvos
-    function WindowInstance:CreatePlayerManager(tabName: string)
-        local PTab = self:CreateTab(tabName or "Player List")
-        local VisualSec = PTab:CreateSection("ESP Configurations", "Left")
-        
-        VisualSec:CreateToggle({
-            Name = "Master Activation ESP", Default = false,
-            Callback = function(state) ESPEngine.Active = state end
-        })
-        VisualSec:CreateToggle({
-            Name = "Render 2D Bounding Boxes", Default = false,
-            Callback = function(state) ESPEngine.Boxes = state end
-        })
-        VisualSec:CreateToggle({
-            Name = "Render Entity Name Headers", Default = false,
-            Callback = function(state) ESPEngine.Names = state end
-        })
-        VisualSec:CreateToggle({
-            Name = "Render Fractional Health Bars", Default = false,
-            Callback = function(state) ESPEngine.Health = state end
-        })
-        VisualSec:CreateToggle({
-            Name = "Render Vector Screen Tracers", Default = false,
-            Callback = function(state) ESPEngine.Tracers = state end
-        })
-        VisualSec:CreateToggle({
-            Name = "Perform Raycast Occulsion Check", Default = true,
-            Callback = function(state) ESPEngine.VisibleCheck = state end
-        })
+function UnloadManager:UnloadUI(screenGuiRef)
+    -- Run callbacks
+    for _, fn in ipairs(self._callbacks) do
+        pcall(fn)
+    end
+    self._callbacks = {}
 
-        local ActionsSec = PTab:CreateSection("Target Action Panel", "Right")
-        
-        local function PopulatePlayerTable(): {string}
-            local tbl = {}
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer then table.insert(tbl, p.Name) end
-            end
-            return tbl
-        end
+    -- Disconnect events
+    self:DisconnectEvents()
 
-        local PlrDropdown = ActionsSec:CreateDropdown({
-            Name = "Target Entity", Options = PopulatePlayerTable(), Default = "None"
-        })
+    -- Clear memory
+    self:ClearMemory()
 
-        Players.PlayerAdded:Connect(function() PlrDropdown:Refresh(PopulatePlayerTable()) end)
-        Players.PlayerRemoving:Connect(function() PlrDropdown:Refresh(PopulatePlayerTable()) end)
+    -- Destroy UI
+    if screenGuiRef and screenGuiRef.Parent then
+        pcall(function()
+            Utility.TweenObject(screenGuiRef, { }, 0.3)
+            task.delay(0.35, function()
+                screenGuiRef:Destroy()
+            end)
+        end)
+    end
 
-        local activeSpectate = false
-        ActionsSec:CreateButton({
-            Name = "Toggle Camera Spectate",
-            Callback = function()
-                local tName = PlrDropdown.Selected
-                local target = Players:FindFirstChild(tName or "")
-                if target and target.Character then
-                    if activeSpectate then
-                        local myHum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                        if myHum then Camera.CameraSubject = myHum end
-                        activeSpectate = false
-                        Core:Notify({Title = "Spectate", Text = "Camera focused back to LocalPlayer."})
-                    else
-                        local tHum = target.Character:FindFirstChildOfClass("Humanoid")
-                        if tHum then Camera.CameraSubject = tHum end
-                        activeSpectate = true
-                        Core:Notify({Title = "Spectate", Text = "Camera locked on: " .. target.DisplayName})
-                    end
-                end
-            end
-        })
+    -- Hide cursor if needed
+    UserInputService.MouseIconEnabled = true
+end
 
-        ActionsSec:CreateButton({
-            Name = "Vector Warp Behind Target", Cooldown = 1.5,
-            Callback = function()
-                local tName = PlrDropdown.Selected
-                local target = Players:FindFirstChild(tName or "")
-                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                local tRoot = target and target.Character and target.Character:FindFirstChild("HumanoidRootPart")
-                
-                if myRoot and tRoot then
-                    myRoot.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3.5)
-                end
-            end
-        })
+--// ============================================================
+--// EXTERNAL API
+--// Central controller for all widgets
+--// ============================================================
+
+local ExternalAPI = {}
+ExternalAPI.__index = ExternalAPI
+ExternalAPI._registry = {}
+
+function ExternalAPI:Register(id, widget)
+    self._registry[id] = widget
+end
+
+function ExternalAPI:Get(id)
+    return self._registry[id]
+end
+
+function ExternalAPI:Toggle(id, state)
+    local w = self._registry[id]
+    if w and w.SetState then
+        w:SetState(state)
     end
 end
 
-return SystemsModule
+function ExternalAPI:SetSlider(id, value)
+    local w = self._registry[id]
+    if w and w.SetValue then
+        w:SetValue(value)
+    end
+end
+
+function ExternalAPI:SetDropdown(id, option)
+    local w = self._registry[id]
+    if w and w.SelectOption then
+        w:SelectOption(option)
+    end
+end
+
+function ExternalAPI:SetColor(id, color)
+    local w = self._registry[id]
+    if w and w.SetColor then
+        w:SetColor(color)
+    end
+end
+
+function ExternalAPI:SetKeybind(id, key)
+    local w = self._registry[id]
+    if w and w.SetKeybind then
+        w:SetKeybind(key)
+    end
+end
+
+function ExternalAPI:FireButton(id)
+    local w = self._registry[id]
+    if w and w._callback then
+        task.spawn(w._callback)
+    end
+end
+
+function ExternalAPI:SetEnabled(id, enabled)
+    local w = self._registry[id]
+    if w and w.SetEnabled then
+        w:SetEnabled(enabled)
+    end
+end
+
+--// ============================================================
+--// MAIN.LUA - Full Usage Example
+--// ============================================================
+
+-- This demonstrates how to wire everything together.
+-- In a real executor script, replace loadstring urls with your actual module paths.
+
+local function InitEvok()
+    -- Initialize systems
+    ConfigSystem:Init("MyScript")
+
+    -- Create window
+    local Window = {
+        _tabs = {},
+        _activeTab = nil,
+        _open = true,
+    }
+
+    -- The full WindowManager would be loaded from Core
+    -- local Win = Core.WindowManager.new({
+    --     Title    = "Evok",
+    --     Subtitle = "Zynn Love you <3",
+    --     Size     = Vector2.new(560, 440),
+    --     Theme    = "Evok",
+    -- })
+
+    -- Example: Creating tabs and widgets manually
+    -- local AimingTab  = Win:CreateTab("Aiming")
+    -- local VisualsTab = Win:CreateTab("Visuals")
+    -- local MiscTab    = Win:CreateTab("Misc")
+    -- local OutputTab  = Win:CreateTab("Output")
+    -- local OptionsTab = Win:CreateTab("Options")
+    -- local SVTab      = Win:CreateTab("Script Viewer")
+    -- local PLTab      = Win:CreateTab("Player List")
+
+    -- Example section + widget creation:
+    -- local sec = SectionSystem.new(AimingTab, { Mode = "Double" })
+    -- local leftSection  = sec:CreateSection("Aimbot", "Left")
+    -- local rightSection = sec:CreateSection("Silent Aim", "Right")
+
+    -- local enabledToggle = Toggle.new(leftSection, "Enabled", false, function(state)
+    --     print("Aimbot enabled:", state)
+    -- end)
+    -- ExternalAPI:Register("aimbot_enabled", enabledToggle)
+
+    -- local hitPartDrop = Dropdown.new(leftSection, "Hit Part",
+    --     {"Head", "Neck", "Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg"},
+    --     "Head",
+    --     function(val)
+    --         print("Hit part:", val)
+    --     end
+    -- )
+    -- ExternalAPI:Register("hit_part", hitPartDrop)
+
+    -- local aimTypeDrop = Dropdown.new(leftSection, "Aim Type",
+    --     {"Memory", "Humanoid", "Lerp", "Instant"},
+    --     "Memory",
+    --     function(val)
+    --         print("Aim type:", val)
+    --     end
+    -- )
+
+    -- local distSlider = Slider.new(leftSection, "Distance",
+    --     0, 2000, 1112,
+    --     function(val)
+    --         print("Distance:", val)
+    --     end
+    -- )
+    -- ExternalAPI:Register("aim_distance", distSlider)
+
+    -- local predictionSliderX = Slider.new(leftSection, "Aim Prediction X",
+    --     1, 20, 1, function(val) end, { Decimals = 2 }
+    -- )
+
+    -- local predictionSliderY = Slider.new(leftSection, "Aim Prediction Y",
+    --     1, 20, 1, function(val) end, { Decimals = 2 }
+    -- )
+
+    -- Right section (Silent Aim)
+    -- local silentEnabled = Toggle.new(rightSection, "Enabled", true, function(state) end)
+    -- local healthCheck   = Toggle.new(rightSection, "Health Check", false, function(state) end)
+    -- local knockCheck    = Toggle.new(rightSection, "Knock Check (?)", false, function(state) end)
+
+    -- local silentHitPart = Dropdown.new(rightSection, "Hit Part",
+    --     {"Head", "Body", "Torso"}, "Body", function(val) end
+    -- )
+
+    -- local silentDist = Slider.new(rightSection, "Distance",
+    --     0, 2000, 1112, function(val) end
+    -- )
+
+    -- local silentFOV = Toggle.new(rightSection, "Silent FOV Enabled", true, function(state) end)
+    -- local sizeSl    = Slider.new(rightSection, "Size", 0, 500, 128, function(val) end)
+
+    -- Notifications
+    -- NotificationManager:Notify({
+    --     Title   = "Evok Loaded",
+    --     Message = "UI Library initialized successfully!",
+    --     Type    = "Success",
+    --     Duration = 4,
+    -- })
+
+    -- Watermark
+    -- Watermark:Create({
+    --     Label    = "Evok",
+    --     ShowFPS  = true,
+    --     ShowPing = true,
+    --     ShowMem  = true,
+    --     ShowTime = true,
+    -- })
+
+    -- External API usage examples:
+    -- ExternalAPI:Toggle("aimbot_enabled", true)
+    -- ExternalAPI:SetSlider("aim_distance", 2000)
+    -- ExternalAPI:SetDropdown("hit_part", "Body")
+
+    -- Config examples:
+    -- ConfigSystem:RegisterToggle("aimbot_enabled", enabledToggle)
+    -- ConfigSystem:RegisterSlider("aim_distance", distSlider)
+    -- ConfigSystem:RegisterDropdown("hit_part", hitPartDrop)
+    -- ConfigSystem:AutoLoad("default")
+
+    -- Unload example:
+    -- UnloadManager:OnUnload(function()
+    --     print("Evok unloaded!")
+    -- end)
+
+    print("[Evok] Loaded successfully - Zynn Love you <3")
+end
+
+-- InitEvok()
+
+--// ============================================================
+--// EXPORTS
+--// ============================================================
+
+return {
+    ConfigSystem    = ConfigSystem,
+    SearchBar       = SearchBar,
+    PlayerList      = PlayerList,
+    ProfileManager  = ProfileManager,
+    AcrylicBlur     = AcrylicBlur,
+    ScriptViewer    = ScriptViewer,
+    UnloadManager   = UnloadManager,
+    ExternalAPI     = ExternalAPI,
+}
