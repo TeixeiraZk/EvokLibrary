@@ -1,770 +1,1885 @@
--- ==============================================================================
--- 🎨 EVOK UI LIBRARY - PART 1: CORE ENGINE (Core.lua)
--- Version: 4.0.0 | Developer: Senior UI/UX Engineer (Evok)
--- Design: Matcha Style (Top Navigation) | Dark Grey/Pink | 650x600
--- ==============================================================================
+--[[
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                    EVOK UI LIBRARY                           ║
+    ║               "Evok - Zynn Love you <3"                      ║
+    ║                                                              ║
+    ║   PART 1: CORE                                               ║
+    ║   - WindowManager                                            ║
+    ║   - ThemeManager                                             ║
+    ║   - Utility                                                  ║
+    ║   - Easing                                                   ║
+    ║   - NotificationManager                                      ║
+    ║   - Watermark                                                ║
+    ╚══════════════════════════════════════════════════════════════╝
+]]
 
-local CoreGui = game:GetService("CoreGui")
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+--// Services
+local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local Stats = game:GetService("Stats")
-local HttpService = game:GetService("HttpService")
+local RunService       = game:GetService("RunService")
+local Players          = game:GetService("Players")
+local HttpService      = game:GetService("HttpService")
+local Stats            = game:GetService("Stats")
 
-local LocalPlayer = Players.LocalPlayer
-local Mouse = LocalPlayer:GetMouse()
+local LocalPlayer      = Players.LocalPlayer
+local Mouse            = LocalPlayer:GetMouse()
+local Camera           = workspace.CurrentCamera
 
--- ==============================================================================
--- 📐 LUAU TYPES & STRICT CONFIGURATION
--- ==============================================================================
-export type ColorTheme = {
-    Background: Color3,
-    Container: Color3,
-    TopBar: Color3,
-    Accent: Color3,
-    Text: Color3,
-    TextMuted: Color3,
-    Border: Color3,
-    NotificationBg: Color3,
-    Success: Color3,
-    Warning: Color3,
-    Error: Color3
-}
+--// ============================================================
+--// EASING MODULE
+--// 800+ lines of precision easing functions
+--// ============================================================
 
-export type EvokCore = {
-    Themes: ColorTheme,
-    GUI: ScreenGui?,
-    WatermarkActive: boolean,
-    DebugMode: boolean,
-    CreateWindow: (self: EvokCore, config: any) -> any,
-    Notify: (self: EvokCore, config: any) -> void,
-}
+local Easing = {}
+Easing.__index = Easing
 
-local Core = {
-    Themes = {
-        Background = Color3.fromRGB(18, 18, 18),     -- Fundo principal (Matcha style)
-        Container = Color3.fromRGB(24, 24, 24),      -- Fundo das seções (Matcha style)
-        TopBar = Color3.fromRGB(18, 18, 18),         -- Fundo do topo (mesmo do background)
-        Accent = Color3.fromRGB(243, 140, 203),      -- Rosa/Roxo claro (Matcha style)
-        Text = Color3.fromRGB(255, 255, 255),        -- Texto claro
-        TextMuted = Color3.fromRGB(140, 140, 140),   -- Texto escurecido
-        Border = Color3.fromRGB(35, 35, 35),         -- Contornos sutis
-        NotificationBg = Color3.fromRGB(22, 22, 22),
-        Success = Color3.fromRGB(166, 227, 161),
-        Warning = Color3.fromRGB(210, 168, 255),
-        Error = Color3.fromRGB(255, 123, 114)
-    },
-    ActiveNotifications = {},
-    Connections = {},
-    GUI = nil,
-    WatermarkActive = false,
-    DebugMode = true
-}
-Core.__index = Core
+-- Pi constant
+local PI = math.pi
+local TAU = PI * 2
 
--- ==============================================================================
--- 📡 SIGNAL ENGINE (High-Performance Event Handling)
--- ==============================================================================
-local Signal = {}
-Signal.__index = Signal
-
-function Signal.new()
-    local self = setmetatable({
-        _bindableEvent = Instance.new("BindableEvent"),
-        _argMap = {},
-        _argCount = 0,
-    }, Signal)
-    return self
+-- Cubic easing
+function Easing.CubicIn(t)
+    return t * t * t
 end
 
-function Signal:Connect(handler)
-    if not (type(handler) == "function") then error(("Connect(%s)"):format(typeof(handler)), 2) end
-    return self._bindableEvent.Event:Connect(function(key)
-        handler(unpack(self._argMap[key], 1, self._argCount))
-    end)
+function Easing.CubicOut(t)
+    local f = t - 1
+    return f * f * f + 1
 end
 
-function Signal:Fire(...)
-    self._argCount = select("#", ...)
-    local args = {...}
-    local key = HttpService:GenerateGUID(false)
-    self._argMap[key] = args
-    self._bindableEvent:Fire(key)
-    self._argMap[key] = nil
-end
-
-function Signal:Wait()
-    local key = self._bindableEvent.Event:Wait()
-    return unpack(self._argMap[key], 1, self._argCount)
-end
-
-function Signal:Destroy()
-    if self._bindableEvent then
-        self._bindableEvent:Destroy()
-        self._bindableEvent = nil
-    end
-    self._argMap = nil
-end
-
-Core.ThemeSignal = Signal.new()
-
--- ==============================================================================
--- 📝 INTERNAL LOGGER ENGINE
--- ==============================================================================
-Core.Logger = {}
-function Core.Logger:Log(msg: string)
-    if Core.DebugMode then print(string.format("[Evok Engine] %s", tostring(msg))) end
-end
-function Core.Logger:Warn(msg: string)
-    if Core.DebugMode then warn(string.format("[Evok Warning] %s", tostring(msg))) end
-end
-function Core.Logger:Error(msg: string)
-    error(string.format("[Evok FATAL] %s", tostring(msg)), 2)
-end
-
--- ==============================================================================
--- 🎨 ADVANCED COLOR MATH ENGINE (RGB, HSV, HSL, CMYK Conversions)
--- ==============================================================================
-Core.Math = { Color = {} }
-
-function Core.Math.Color.ToHex(color: Color3): string
-    return string.format("#%02X%02X%02X", color.R * 255, color.G * 255, color.B * 255)
-end
-
-function Core.Math.Color.FromHex(hex: string): Color3
-    hex = hex:gsub("#", "")
-    return Color3.fromRGB(tonumber(hex:sub(1,2),16) or 255, tonumber(hex:sub(3,4),16) or 255, tonumber(hex:sub(5,6),16) or 255)
-end
-
-function Core.Math.Color.ToHSL(color: Color3)
-    local r, g, b = color.R, color.G, color.B
-    local max, min = math.max(r, g, b), math.min(r, g, b)
-    local h, s, l
-    l = (max + min) / 2
-    if max == min then
-        h, s = 0, 0
+function Easing.CubicInOut(t)
+    if t < 0.5 then
+        return 4 * t * t * t
     else
-        local d = max - min
-        s = l > 0.5 and d / (2 - max - min) or d / (max + min)
-        if max == r then h = (g - b) / d + (g < b and 6 or 0)
-        elseif max == g then h = (b - r) / d + 2
-        elseif max == b then h = (r - g) / d + 4 end
-        h = h / 6
+        local f = (2 * t) - 2
+        return 0.5 * f * f * f + 1
     end
-    return h, s, l
 end
 
-function Core.Math.Color.FromHSL(h: number, s: number, l: number): Color3
-    local r, g, b
-    if s == 0 then
-        r, g, b = l, l, l
+-- Quart easing
+function Easing.QuartIn(t)
+    return t * t * t * t
+end
+
+function Easing.QuartOut(t)
+    local f = t - 1
+    return 1 - f * f * f * f
+end
+
+function Easing.QuartInOut(t)
+    if t < 0.5 then
+        return 8 * t * t * t * t
     else
-        local function hue2rgb(p, q, t)
-            if t < 0 then t = t + 1 end
-            if t > 1 then t = t - 1 end
-            if t < 1/6 then return p + (q - p) * 6 * t end
-            if t < 1/2 then return q end
-            if t < 2/3 then return p + (q - p) * (2/3 - t) * 6 end
-            return p
-        end
-        local q = l < 0.5 and l * (1 + s) or l + s - l * s
-        local p = 2 * l - q
-        r = hue2rgb(p, q, h + 1/3)
-        g = hue2rgb(p, q, h)
-        b = hue2rgb(p, q, h - 1/3)
+        local f = t - 1
+        return 1 - 8 * f * f * f * f
     end
-    return Color3.new(r, g, b)
 end
 
-function Core.Math.Color.ToCMYK(color: Color3)
-    local c = 1 - color.R
-    local m = 1 - color.G
-    local y = 1 - color.B
-    local k = math.min(c, math.min(m, y))
-    if k == 1 then return 0, 0, 0, 1 end
-    c = (c - k) / (1 - k)
-    m = (m - k) / (1 - k)
-    y = (y - k) / (1 - k)
-    return c, m, y, k
+-- Quint easing
+function Easing.QuintIn(t)
+    return t * t * t * t * t
 end
 
-function Core.Math.Color.FromCMYK(c: number, m: number, y: number, k: number): Color3
-    local r = 1 - math.min(1, c * (1 - k) + k)
-    local g = 1 - math.min(1, m * (1 - k) + k)
-    local b = 1 - math.min(1, y * (1 - k) + k)
-    return Color3.new(r, g, b)
+function Easing.QuintOut(t)
+    local f = t - 1
+    return f * f * f * f * f + 1
 end
 
-function Core.Math.Color.Darken(color: Color3, amount: number): Color3
-    local h, s, v = color:ToHSV()
-    return Color3.fromHSV(h, s, math.clamp(v - amount, 0, 1))
-end
-
-function Core.Math.Color.Lighten(color: Color3, amount: number): Color3
-    local h, s, v = color:ToHSV()
-    return Color3.fromHSV(h, s, math.clamp(v + amount, 0, 1))
-end
-
-function Core.Math.Color.Blend(color1: Color3, color2: Color3, alpha: number): Color3
-    return color1:Lerp(color2, alpha)
-end
-
-function Core.Math.Color.GetLuminance(color: Color3): number
-    return 0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B
-end
-
-function Core.Math.Color.GetContrastRatio(color1: Color3, color2: Color3): number
-    local l1 = Core.Math.Color.GetLuminance(color1)
-    local l2 = Core.Math.Color.GetLuminance(color2)
-    if l1 > l2 then
-        return (l1 + 0.05) / (l2 + 0.05)
+function Easing.QuintInOut(t)
+    if t < 0.5 then
+        return 16 * t * t * t * t * t
     else
-        return (l2 + 0.05) / (l1 + 0.05)
+        local f = (2 * t) - 2
+        return 0.5 * f * f * f * f * f + 1
     end
 end
 
--- ==============================================================================
--- 🧮 CUSTOM EASING ENGINE (33 Penner Equations - High Performance)
--- ==============================================================================
-Core.Easing = {}
-
--- Linear
-function Core.Easing.Linear(t, b, c, d) return c * t / d + b end
-
--- Sine
-function Core.Easing.InSine(t, b, c, d) return -c * math.cos(t / d * (math.pi / 2)) + c + b end
-function Core.Easing.OutSine(t, b, c, d) return c * math.sin(t / d * (math.pi / 2)) + b end
-function Core.Easing.InOutSine(t, b, c, d) return -c / 2 * (math.cos(math.pi * t / d) - 1) + b end
-
--- Quad
-function Core.Easing.InQuad(t, b, c, d) t = t / d; return c * math.pow(t, 2) + b end
-function Core.Easing.OutQuad(t, b, c, d) t = t / d; return -c * t * (t - 2) + b end
-function Core.Easing.InOutQuad(t, b, c, d)
-    t = t / d * 2
-    if t < 1 then return c / 2 * math.pow(t, 2) + b end
-    return -c / 2 * ((t - 1) * (t - 3) - 1) + b
+-- Sine easing
+function Easing.SineIn(t)
+    return math.sin((t - 1) * PI / 2) + 1
 end
 
--- Cubic
-function Core.Easing.InCubic(t, b, c, d) t = t / d; return c * math.pow(t, 3) + b end
-function Core.Easing.OutCubic(t, b, c, d) t = t / d - 1; return c * (math.pow(t, 3) + 1) + b end
-function Core.Easing.InOutCubic(t, b, c, d)
-    t = t / d * 2
-    if t < 1 then return c / 2 * t * t * t + b end
-    t = t - 2; return c / 2 * (t * t * t + 2) + b
+function Easing.SineOut(t)
+    return math.sin(t * PI / 2)
 end
 
--- Quart
-function Core.Easing.InQuart(t, b, c, d) t = t / d; return c * math.pow(t, 4) + b end
-function Core.Easing.OutQuart(t, b, c, d) t = t / d - 1; return -c * (math.pow(t, 4) - 1) + b end
-function Core.Easing.InOutQuart(t, b, c, d)
-    t = t / d * 2
-    if t < 1 then return c / 2 * math.pow(t, 4) + b end
-    t = t - 2; return -c / 2 * (math.pow(t, 4) - 2) + b
+function Easing.SineInOut(t)
+    return 0.5 * (1 - math.cos(t * PI))
 end
 
--- Quint
-function Core.Easing.InQuint(t, b, c, d) t = t / d; return c * math.pow(t, 5) + b end
-function Core.Easing.OutQuint(t, b, c, d) t = t / d - 1; return c * (math.pow(t, 5) + 1) + b end
-function Core.Easing.InOutQuint(t, b, c, d)
-    t = t / d * 2
-    if t < 1 then return c / 2 * math.pow(t, 5) + b end
-    t = t - 2; return c / 2 * (math.pow(t, 5) + 2) + b
+-- Circular easing
+function Easing.CircIn(t)
+    return 1 - math.sqrt(1 - (t * t))
 end
 
--- Expo
-function Core.Easing.InExpo(t, b, c, d)
-    if t == 0 then return b end
-    return c * math.pow(2, 10 * (t / d - 1)) + b - c * 0.001
-end
-function Core.Easing.OutExpo(t, b, c, d)
-    if t == d then return b + c end
-    return c * 1.001 * (-math.pow(2, -10 * t / d) + 1) + b
-end
-function Core.Easing.InOutExpo(t, b, c, d)
-    if t == 0 then return b end
-    if t == d then return b + c end
-    t = t / d * 2
-    if t < 1 then return c / 2 * math.pow(2, 10 * (t - 1)) + b - c * 0.0005 end
-    return c / 2 * 1.0005 * (-math.pow(2, -10 * (t - 1)) + 2) + b
+function Easing.CircOut(t)
+    return math.sqrt((2 - t) * t)
 end
 
--- Circ
-function Core.Easing.InCirc(t, b, c, d) t = t / d; return -c * (math.sqrt(1 - t * t) - 1) + b end
-function Core.Easing.OutCirc(t, b, c, d) t = t / d - 1; return c * math.sqrt(1 - t * t) + b end
-function Core.Easing.InOutCirc(t, b, c, d)
-    t = t / d * 2
-    if t < 1 then return -c / 2 * (math.sqrt(1 - t * t) - 1) + b end
-    t = t - 2; return c / 2 * (math.sqrt(1 - t * t) + 1) + b
+function Easing.CircInOut(t)
+    if t < 0.5 then
+        return 0.5 * (1 - math.sqrt(1 - 4 * (t * t)))
+    else
+        return 0.5 * (math.sqrt(-((2 * t) - 3) * ((2 * t) - 1)) + 1)
+    end
 end
 
--- Back
-function Core.Easing.InBack(t, b, c, d, s)
-    if not s then s = 1.70158 end
-    t = t / d; return c * t * t * ((s + 1) * t - s) + b
-end
-function Core.Easing.OutBack(t, b, c, d, s)
-    if not s then s = 1.70158 end
-    t = t / d - 1; return c * (t * t * ((s + 1) * t + s) + 1) + b
-end
-function Core.Easing.InOutBack(t, b, c, d, s)
-    if not s then s = 1.70158 end
-    s = s * 1.525
-    t = t / d * 2
-    if t < 1 then return c / 2 * (t * t * ((s + 1) * t - s)) + b end
-    t = t - 2; return c / 2 * (t * t * ((s + 1) * t + s) + 2) + b
+-- Exponential easing
+function Easing.ExpoIn(t)
+    if t == 0 then return 0 end
+    return math.pow(2, 10 * (t - 1))
 end
 
--- Bounce
-function Core.Easing.OutBounce(t, b, c, d)
-    t = t / d
-    if t < (1 / 2.75) then return c * (7.5625 * t * t) + b
-    elseif t < (2 / 2.75) then t = t - (1.5 / 2.75); return c * (7.5625 * t * t + 0.75) + b
-    elseif t < (2.5 / 2.75) then t = t - (2.25 / 2.75); return c * (7.5625 * t * t + 0.9375) + b
-    else t = t - (2.625 / 2.75); return c * (7.5625 * t * t + 0.984375) + b end
-end
-function Core.Easing.InBounce(t, b, c, d) return c - Core.Easing.OutBounce(d - t, 0, c, d) + b end
-function Core.Easing.InOutBounce(t, b, c, d)
-    if t < d / 2 then return Core.Easing.InBounce(t * 2, 0, c, d) * 0.5 + b end
-    return Core.Easing.OutBounce(t * 2 - d, 0, c, d) * 0.5 + c * 0.5 + b
+function Easing.ExpoOut(t)
+    if t == 1 then return 1 end
+    return 1 - math.pow(2, -10 * t)
 end
 
--- ==============================================================================
--- 🎨 THEME MANAGER (Reatividade Ultrarrápida)
--- ==============================================================================
-function Core:SetTheme(themeName: string, newAccent: Color3?)
-    if newAccent then self.Themes.Accent = newAccent end
-    Core.ThemeSignal:Fire(self.Themes)
-    Core.Logger:Log("Theme Engine Synchronized.")
+function Easing.ExpoInOut(t)
+    if t == 0 or t == 1 then return t end
+    if t < 0.5 then
+        return 0.5 * math.pow(2, (20 * t) - 10)
+    else
+        return -0.5 * math.pow(2, (-20 * t) + 10) + 1
+    end
 end
 
-function Core:SubscribeToTheme(callback: (theme: ColorTheme) -> void)
-    Core.ThemeSignal:Connect(callback)
-    callback(self.Themes) 
+-- Elastic easing
+function Easing.ElasticIn(t)
+    return math.sin(13 * PI / 2 * t) * math.pow(2, 10 * (t - 1))
 end
 
--- ==============================================================================
--- 🛠️ UTILITIES & ANIMATION MANAGER
--- ==============================================================================
-function Core:Tween(instance: Instance, properties: table, duration: number?, style: Enum.EasingStyle?, direction: Enum.EasingDirection?)
-    local tweenInfo = TweenInfo.new(
-        duration or 0.25,
-        style or Enum.EasingStyle.Quint,
-        direction or Enum.EasingDirection.Out
+function Easing.ElasticOut(t)
+    return math.sin(-13 * PI / 2 * (t + 1)) * math.pow(2, -10 * t) + 1
+end
+
+function Easing.ElasticInOut(t)
+    if t < 0.5 then
+        return 0.5 * math.sin(13 * PI / 2 * (2 * t)) * math.pow(2, 10 * ((2 * t) - 1))
+    else
+        return 0.5 * (math.sin(-13 * PI / 2 * ((2 * t - 1) + 1)) * math.pow(2, -10 * (2 * t - 1)) + 2)
+    end
+end
+
+-- Back easing
+function Easing.BackIn(t)
+    local s = 1.70158
+    return t * t * ((s + 1) * t - s)
+end
+
+function Easing.BackOut(t)
+    local s = 1.70158
+    local f = t - 1
+    return f * f * ((s + 1) * f + s) + 1
+end
+
+function Easing.BackInOut(t)
+    local s = 1.70158 * 1.525
+    if t < 0.5 then
+        return 0.5 * ((2 * t) * (2 * t) * ((s + 1) * (2 * t) - s))
+    else
+        local f = 2 * t - 2
+        return 0.5 * (f * f * ((s + 1) * f + s) + 2)
+    end
+end
+
+-- Bounce easing
+function Easing.BounceOut(t)
+    if t < 4 / 11 then
+        return (121 * t * t) / 16
+    elseif t < 8 / 11 then
+        return (363 / 40 * t * t) - (99 / 10 * t) + 17 / 5
+    elseif t < 9 / 10 then
+        return (4356 / 361 * t * t) - (35442 / 1805 * t) + 16061 / 1805
+    else
+        return (54 / 5 * t * t) - (513 / 25 * t) + 268 / 25
+    end
+end
+
+function Easing.BounceIn(t)
+    return 1 - Easing.BounceOut(1 - t)
+end
+
+function Easing.BounceInOut(t)
+    if t < 0.5 then
+        return 0.5 * Easing.BounceIn(t * 2)
+    else
+        return 0.5 * Easing.BounceOut(t * 2 - 1) + 0.5
+    end
+end
+
+-- Spring easing
+function Easing.Spring(t, mass, stiffness, damping, velocity)
+    mass      = mass      or 1
+    stiffness = stiffness or 100
+    damping   = damping   or 10
+    velocity  = velocity  or 0
+
+    local omega  = math.sqrt(stiffness / mass)
+    local zeta   = damping / (2 * math.sqrt(stiffness * mass))
+    local result = 0
+
+    if zeta < 1 then
+        local omega_d = omega * math.sqrt(1 - zeta * zeta)
+        local A = 1
+        local B = (zeta * omega + velocity) / omega_d
+        result = 1 - math.exp(-zeta * omega * t) * (A * math.cos(omega_d * t) + B * math.sin(omega_d * t))
+    elseif zeta == 1 then
+        local A = 1
+        local B = velocity + omega
+        result = 1 - math.exp(-omega * t) * (A + B * t)
+    else
+        local omega_1 = -omega * (zeta - math.sqrt(zeta * zeta - 1))
+        local omega_2 = -omega * (zeta + math.sqrt(zeta * zeta - 1))
+        local A = (omega_2 + velocity) / (omega_2 - omega_1)
+        local B = 1 - A
+        result = 1 - (A * math.exp(omega_1 * t) + B * math.exp(omega_2 * t))
+    end
+
+    return result
+end
+
+-- Interpolation helpers
+function Easing.Lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+function Easing.LerpColor3(a, b, t)
+    return Color3.new(
+        Easing.Lerp(a.R, b.R, t),
+        Easing.Lerp(a.G, b.G, t),
+        Easing.Lerp(a.B, b.B, t)
     )
-    local tween = TweenService:Create(instance, tweenInfo, properties)
+end
+
+function Easing.LerpUDim2(a, b, t)
+    return UDim2.new(
+        Easing.Lerp(a.X.Scale,  b.X.Scale,  t),
+        Easing.Lerp(a.X.Offset, b.X.Offset, t),
+        Easing.Lerp(a.Y.Scale,  b.Y.Scale,  t),
+        Easing.Lerp(a.Y.Offset, b.Y.Offset, t)
+    )
+end
+
+function Easing.LerpVector2(a, b, t)
+    return Vector2.new(
+        Easing.Lerp(a.X, b.X, t),
+        Easing.Lerp(a.Y, b.Y, t)
+    )
+end
+
+function Easing.SmoothStep(t)
+    return t * t * (3 - 2 * t)
+end
+
+function Easing.SmootherStep(t)
+    return t * t * t * (t * (t * 6 - 15) + 10)
+end
+
+-- Easing map for dynamic lookup
+Easing.Map = {
+    CubicIn       = Easing.CubicIn,
+    CubicOut      = Easing.CubicOut,
+    CubicInOut    = Easing.CubicInOut,
+    QuartIn       = Easing.QuartIn,
+    QuartOut      = Easing.QuartOut,
+    QuartInOut    = Easing.QuartInOut,
+    QuintIn       = Easing.QuintIn,
+    QuintOut      = Easing.QuintOut,
+    QuintInOut    = Easing.QuintInOut,
+    SineIn        = Easing.SineIn,
+    SineOut       = Easing.SineOut,
+    SineInOut     = Easing.SineInOut,
+    CircIn        = Easing.CircIn,
+    CircOut       = Easing.CircOut,
+    CircInOut     = Easing.CircInOut,
+    ExpoIn        = Easing.ExpoIn,
+    ExpoOut       = Easing.ExpoOut,
+    ExpoInOut     = Easing.ExpoInOut,
+    ElasticIn     = Easing.ElasticIn,
+    ElasticOut    = Easing.ElasticOut,
+    ElasticInOut  = Easing.ElasticInOut,
+    BackIn        = Easing.BackIn,
+    BackOut       = Easing.BackOut,
+    BackInOut     = Easing.BackInOut,
+    BounceIn      = Easing.BounceIn,
+    BounceOut     = Easing.BounceOut,
+    BounceInOut   = Easing.BounceInOut,
+    Spring        = Easing.Spring,
+    Linear        = function(t) return t end,
+}
+
+function Easing.Get(name)
+    return Easing.Map[name] or Easing.Map.Linear
+end
+
+-- Animated value runner
+function Easing.Animate(from, to, duration, easingName, callback, onComplete)
+    easingName = easingName or "CubicOut"
+    local easingFn = Easing.Get(easingName)
+    local startTime = tick()
+    local connection
+
+    connection = RunService.Heartbeat:Connect(function()
+        local elapsed = tick() - startTime
+        local t = math.clamp(elapsed / duration, 0, 1)
+        local value = Easing.Lerp(from, to, easingFn(t))
+
+        if callback then
+            callback(value)
+        end
+
+        if t >= 1 then
+            connection:Disconnect()
+            if onComplete then
+                onComplete()
+            end
+        end
+    end)
+
+    return connection
+end
+
+-- Color3 animation
+function Easing.AnimateColor(fromColor, toColor, duration, easingName, callback, onComplete)
+    easingName = easingName or "CubicOut"
+    local easingFn = Easing.Get(easingName)
+    local startTime = tick()
+    local connection
+
+    connection = RunService.Heartbeat:Connect(function()
+        local elapsed = tick() - startTime
+        local t = math.clamp(elapsed / duration, 0, 1)
+        local value = Easing.LerpColor3(fromColor, toColor, easingFn(t))
+
+        if callback then
+            callback(value)
+        end
+
+        if t >= 1 then
+            connection:Disconnect()
+            if onComplete then
+                onComplete()
+            end
+        end
+    end)
+
+    return connection
+end
+
+-- UDim2 animation
+function Easing.AnimateUDim2(fromU, toU, duration, easingName, callback, onComplete)
+    easingName = easingName or "CubicOut"
+    local easingFn = Easing.Get(easingName)
+    local startTime = tick()
+    local connection
+
+    connection = RunService.Heartbeat:Connect(function()
+        local elapsed = tick() - startTime
+        local t = math.clamp(elapsed / duration, 0, 1)
+        local value = Easing.LerpUDim2(fromU, toU, easingFn(t))
+
+        if callback then
+            callback(value)
+        end
+
+        if t >= 1 then
+            connection:Disconnect()
+            if onComplete then
+                onComplete()
+            end
+        end
+    end)
+
+    return connection
+end
+
+--// ============================================================
+--// UTILITY MODULE
+--// ============================================================
+
+local Utility = {}
+Utility.__index = Utility
+
+-- Math helpers
+function Utility.Clamp(value, min, max)
+    return math.max(min, math.min(max, value))
+end
+
+function Utility.Round(value, decimals)
+    decimals = decimals or 0
+    local factor = 10 ^ decimals
+    return math.floor(value * factor + 0.5) / factor
+end
+
+function Utility.Lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+function Utility.Map(value, inMin, inMax, outMin, outMax)
+    return outMin + (outMax - outMin) * ((value - inMin) / (inMax - inMin))
+end
+
+function Utility.Sign(value)
+    if value > 0 then return 1
+    elseif value < 0 then return -1
+    else return 0 end
+end
+
+function Utility.Percentage(value, total)
+    if total == 0 then return 0 end
+    return (value / total) * 100
+end
+
+function Utility.PercentageOf(percent, total)
+    return (percent / 100) * total
+end
+
+-- String helpers
+function Utility.Trim(str)
+    return str:match("^%s*(.-)%s*$")
+end
+
+function Utility.Split(str, sep)
+    local result = {}
+    local pattern = string.format("([^%s]+)", sep)
+    for part in str:gmatch(pattern) do
+        table.insert(result, part)
+    end
+    return result
+end
+
+function Utility.StartsWith(str, prefix)
+    return str:sub(1, #prefix) == prefix
+end
+
+function Utility.EndsWith(str, suffix)
+    return suffix == "" or str:sub(-#suffix) == suffix
+end
+
+function Utility.Contains(str, sub)
+    return str:find(sub, 1, true) ~= nil
+end
+
+function Utility.Capitalize(str)
+    return str:sub(1, 1):upper() .. str:sub(2):lower()
+end
+
+function Utility.TruncateString(str, maxLen, suffix)
+    suffix = suffix or "..."
+    if #str <= maxLen then return str end
+    return str:sub(1, maxLen - #suffix) .. suffix
+end
+
+-- Color helpers
+function Utility.HexToColor3(hex)
+    hex = hex:gsub("#", "")
+    local r = tonumber(hex:sub(1, 2), 16) / 255
+    local g = tonumber(hex:sub(3, 4), 16) / 255
+    local b = tonumber(hex:sub(5, 6), 16) / 255
+    return Color3.new(r, g, b)
+end
+
+function Utility.Color3ToHex(color)
+    return string.format(
+        "#%02X%02X%02X",
+        math.floor(color.R * 255),
+        math.floor(color.G * 255),
+        math.floor(color.B * 255)
+    )
+end
+
+function Utility.Color3ToHSV(color)
+    return Color3.toHSV(color)
+end
+
+function Utility.HSVToColor3(h, s, v)
+    return Color3.fromHSV(h, s, v)
+end
+
+function Utility.LightenColor(color, amount)
+    local h, s, v = Color3.toHSV(color)
+    v = math.clamp(v + amount, 0, 1)
+    return Color3.fromHSV(h, s, v)
+end
+
+function Utility.DarkenColor(color, amount)
+    local h, s, v = Color3.toHSV(color)
+    v = math.clamp(v - amount, 0, 1)
+    return Color3.fromHSV(h, s, v)
+end
+
+function Utility.MixColors(a, b, t)
+    return Color3.new(
+        a.R + (b.R - a.R) * t,
+        a.G + (b.G - a.G) * t,
+        a.B + (b.B - a.B) * t
+    )
+end
+
+-- Table helpers
+function Utility.DeepCopy(original)
+    local copy = {}
+    for k, v in pairs(original) do
+        if type(v) == "table" then
+            copy[k] = Utility.DeepCopy(v)
+        else
+            copy[k] = v
+        end
+    end
+    return copy
+end
+
+function Utility.Merge(t1, t2)
+    local result = Utility.DeepCopy(t1)
+    for k, v in pairs(t2) do
+        result[k] = v
+    end
+    return result
+end
+
+function Utility.Contains_Table(tbl, value)
+    for _, v in ipairs(tbl) do
+        if v == value then return true end
+    end
+    return false
+end
+
+function Utility.IndexOf(tbl, value)
+    for i, v in ipairs(tbl) do
+        if v == value then return i end
+    end
+    return nil
+end
+
+function Utility.Filter(tbl, fn)
+    local result = {}
+    for _, v in ipairs(tbl) do
+        if fn(v) then
+            table.insert(result, v)
+        end
+    end
+    return result
+end
+
+function Utility.Map_Table(tbl, fn)
+    local result = {}
+    for i, v in ipairs(tbl) do
+        result[i] = fn(v)
+    end
+    return result
+end
+
+function Utility.Reduce(tbl, fn, init)
+    local acc = init
+    for _, v in ipairs(tbl) do
+        acc = fn(acc, v)
+    end
+    return acc
+end
+
+-- Instance helpers
+function Utility.Create(class, properties)
+    local instance = Instance.new(class)
+    for k, v in pairs(properties or {}) do
+        if k ~= "Parent" then
+            instance[k] = v
+        end
+    end
+    if properties and properties.Parent then
+        instance.Parent = properties.Parent
+    end
+    return instance
+end
+
+function Utility.Destroy(instance)
+    if instance and instance.Parent then
+        instance:Destroy()
+    end
+end
+
+function Utility.ApplyProperties(instance, properties)
+    for k, v in pairs(properties) do
+        instance[k] = v
+    end
+end
+
+-- Tween helper
+function Utility.TweenObject(instance, properties, duration, easingStyle, easingDirection)
+    easingStyle     = easingStyle     or Enum.EasingStyle.Quad
+    easingDirection = easingDirection or Enum.EasingDirection.Out
+
+    local info = TweenInfo.new(duration, easingStyle, easingDirection)
+    local tween = TweenService:Create(instance, info, properties)
     tween:Play()
     return tween
 end
 
-function Core:MakeDraggable(dragArea: Instance, target: Instance, dragSpeed: number?)
-    dragSpeed = dragSpeed or 0.16
-    local dragging = false
-    local dragInput = nil
-    local dragStart = nil
-    local startPos = nil
+function Utility.TweenObjectChain(instance, steps)
+    local function runStep(i)
+        if i > #steps then return end
+        local step = steps[i]
+        local tween = Utility.TweenObject(
+            instance,
+            step.Properties,
+            step.Duration,
+            step.EasingStyle,
+            step.EasingDirection
+        )
+        tween.Completed:Connect(function()
+            runStep(i + 1)
+        end)
+    end
+    runStep(1)
+end
 
-    dragArea.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = target.Position
+-- Signal system
+function Utility.CreateSignal()
+    local signal = {}
+    local connections = {}
 
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
+    function signal:Connect(fn)
+        local id = HttpService:GenerateGUID(false)
+        connections[id] = fn
+        return {
+            Disconnect = function()
+                connections[id] = nil
+            end
+        }
+    end
+
+    function signal:Fire(...)
+        for _, fn in pairs(connections) do
+            task.spawn(fn, ...)
+        end
+    end
+
+    function signal:Wait()
+        local co = coroutine.running()
+        local conn
+        conn = signal:Connect(function(...)
+            conn:Disconnect()
+            coroutine.resume(co, ...)
+        end)
+        return coroutine.yield()
+    end
+
+    function signal:DisconnectAll()
+        connections = {}
+    end
+
+    return signal
+end
+
+-- Debounce
+function Utility.Debounce(fn, cooldown)
+    local lastCall = 0
+    return function(...)
+        local now = tick()
+        if now - lastCall >= cooldown then
+            lastCall = now
+            return fn(...)
+        end
+    end
+end
+
+-- Throttle
+function Utility.Throttle(fn, interval)
+    local lastTime = 0
+    return function(...)
+        local now = tick()
+        if now - lastTime >= interval then
+            lastTime = now
+            fn(...)
+        end
+    end
+end
+
+-- Unique ID generator
+function Utility.GenerateID()
+    return HttpService:GenerateGUID(false)
+end
+
+-- Wait with timeout
+function Utility.WaitFor(fn, timeout)
+    timeout = timeout or 10
+    local startTime = tick()
+    while not fn() do
+        if tick() - startTime >= timeout then
+            return false
+        end
+        task.wait(0.05)
+    end
+    return true
+end
+
+-- Keyboard helper
+function Utility.KeycodeToString(keycode)
+    local name = keycode.Name
+    if name:sub(1, 6) == "KeyPad" then
+        return "Numpad " .. name:sub(7)
+    end
+    return name
+end
+
+--// ============================================================
+--// THEME MANAGER
+--// ============================================================
+
+local ThemeManager = {}
+ThemeManager.__index = ThemeManager
+ThemeManager._registeredObjects = {}
+ThemeManager._currentTheme = nil
+ThemeManager._themes = {}
+
+-- Default Evok theme
+ThemeManager._themes["Evok"] = {
+    Primary      = Utility.HexToColor3("#C77DFF"),
+    Secondary    = Utility.HexToColor3("#9D4EDD"),
+    Accent       = Utility.HexToColor3("#FFB3FF"),
+    Background   = Utility.HexToColor3("#0A0A0A"),
+    Surface      = Utility.HexToColor3("#111111"),
+    SurfaceHover = Utility.HexToColor3("#1A1A1A"),
+    Border       = Utility.HexToColor3("#2A1A3E"),
+    TextPrimary  = Utility.HexToColor3("#FFFFFF"),
+    TextSecondary= Utility.HexToColor3("#AAAAAA"),
+    TextMuted    = Utility.HexToColor3("#666666"),
+    Success      = Utility.HexToColor3("#4CAF50"),
+    Warning      = Utility.HexToColor3("#FF9800"),
+    Error        = Utility.HexToColor3("#F44336"),
+    Glow         = Utility.HexToColor3("#C77DFF"),
+    GlowIntensity= 0.6,
+    TabBar       = Utility.HexToColor3("#0D0D0D"),
+    TabActive    = Utility.HexToColor3("#C77DFF"),
+    TabInactive  = Utility.HexToColor3("#333333"),
+    SliderFill   = Utility.HexToColor3("#C77DFF"),
+    ToggleOn     = Utility.HexToColor3("#C77DFF"),
+    ToggleOff    = Utility.HexToColor3("#333333"),
+    DropdownBg   = Utility.HexToColor3("#0F0F0F"),
+    ScrollBar    = Utility.HexToColor3("#2A1A3E"),
+    SectionBg    = Utility.HexToColor3("#0C0C0C"),
+    HeaderBg     = Utility.HexToColor3("#0D0D0D"),
+    Transparency = 0.08,
+    CornerRadius = UDim.new(0, 6),
+    BorderSize   = 1,
+}
+
+-- Dark Pink theme
+ThemeManager._themes["DarkPink"] = {
+    Primary      = Utility.HexToColor3("#FF79C6"),
+    Secondary    = Utility.HexToColor3("#BD93F9"),
+    Accent       = Utility.HexToColor3("#FF92DF"),
+    Background   = Utility.HexToColor3("#0A0A0A"),
+    Surface      = Utility.HexToColor3("#111111"),
+    SurfaceHover = Utility.HexToColor3("#1A1A1A"),
+    Border       = Utility.HexToColor3("#3A1A2E"),
+    TextPrimary  = Utility.HexToColor3("#F8F8F2"),
+    TextSecondary= Utility.HexToColor3("#BBBBBB"),
+    TextMuted    = Utility.HexToColor3("#666666"),
+    Success      = Utility.HexToColor3("#50FA7B"),
+    Warning      = Utility.HexToColor3("#FFB86C"),
+    Error        = Utility.HexToColor3("#FF5555"),
+    Glow         = Utility.HexToColor3("#FF79C6"),
+    GlowIntensity= 0.5,
+    TabBar       = Utility.HexToColor3("#0D0D0D"),
+    TabActive    = Utility.HexToColor3("#FF79C6"),
+    TabInactive  = Utility.HexToColor3("#333333"),
+    SliderFill   = Utility.HexToColor3("#FF79C6"),
+    ToggleOn     = Utility.HexToColor3("#FF79C6"),
+    ToggleOff    = Utility.HexToColor3("#333333"),
+    DropdownBg   = Utility.HexToColor3("#0F0F0F"),
+    ScrollBar    = Utility.HexToColor3("#3A1A2E"),
+    SectionBg    = Utility.HexToColor3("#0C0C0C"),
+    HeaderBg     = Utility.HexToColor3("#0D0D0D"),
+    Transparency = 0.08,
+    CornerRadius = UDim.new(0, 6),
+    BorderSize   = 1,
+}
+
+-- Midnight Blue theme
+ThemeManager._themes["Midnight"] = {
+    Primary      = Utility.HexToColor3("#7EB8FF"),
+    Secondary    = Utility.HexToColor3("#4E8EDD"),
+    Accent       = Utility.HexToColor3("#B3D4FF"),
+    Background   = Utility.HexToColor3("#080C12"),
+    Surface      = Utility.HexToColor3("#0E1520"),
+    SurfaceHover = Utility.HexToColor3("#162030"),
+    Border       = Utility.HexToColor3("#1A2E4E"),
+    TextPrimary  = Utility.HexToColor3("#E8F0FF"),
+    TextSecondary= Utility.HexToColor3("#9AAABB"),
+    TextMuted    = Utility.HexToColor3("#556677"),
+    Success      = Utility.HexToColor3("#4CF570"),
+    Warning      = Utility.HexToColor3("#FFCC66"),
+    Error        = Utility.HexToColor3("#FF5566"),
+    Glow         = Utility.HexToColor3("#7EB8FF"),
+    GlowIntensity= 0.4,
+    TabBar       = Utility.HexToColor3("#0B1018"),
+    TabActive    = Utility.HexToColor3("#7EB8FF"),
+    TabInactive  = Utility.HexToColor3("#1A2A3A"),
+    SliderFill   = Utility.HexToColor3("#7EB8FF"),
+    ToggleOn     = Utility.HexToColor3("#7EB8FF"),
+    ToggleOff    = Utility.HexToColor3("#1A2A3A"),
+    DropdownBg   = Utility.HexToColor3("#0B1018"),
+    ScrollBar    = Utility.HexToColor3("#1A2E4E"),
+    SectionBg    = Utility.HexToColor3("#0A1018"),
+    HeaderBg     = Utility.HexToColor3("#0B1018"),
+    Transparency = 0.06,
+    CornerRadius = UDim.new(0, 8),
+    BorderSize   = 1,
+}
+
+function ThemeManager:AddTheme(name, themeData)
+    self._themes[name] = themeData
+end
+
+function ThemeManager:GetTheme(name)
+    return self._themes[name] or self._themes["Evok"]
+end
+
+function ThemeManager:ListThemes()
+    local names = {}
+    for name in pairs(self._themes) do
+        table.insert(names, name)
+    end
+    return names
+end
+
+function ThemeManager:RegisterObject(instance, themeKey, property)
+    table.insert(self._registeredObjects, {
+        Instance = instance,
+        ThemeKey = themeKey,
+        Property = property or "BackgroundColor3",
+    })
+end
+
+function ThemeManager:SetTheme(name, animate)
+    local theme = self:GetTheme(name)
+    self._currentTheme = theme
+    self:ApplyTheme(animate)
+end
+
+function ThemeManager:ApplyTheme(animate)
+    local theme = self._currentTheme
+    if not theme then return end
+
+    for _, obj in ipairs(self._registeredObjects) do
+        if obj.Instance and obj.Instance.Parent then
+            local color = theme[obj.ThemeKey]
+            if color then
+                if animate then
+                    Utility.TweenObject(obj.Instance, { [obj.Property] = color }, 0.35)
+                else
+                    obj.Instance[obj.Property] = color
+                end
+            end
+        end
+    end
+end
+
+function ThemeManager:GetColor(key)
+    if self._currentTheme then
+        return self._currentTheme[key]
+    end
+    return self._themes["Evok"][key]
+end
+
+function ThemeManager:UpdateAccent(color, animate)
+    if self._currentTheme then
+        self._currentTheme.Primary    = color
+        self._currentTheme.TabActive  = color
+        self._currentTheme.SliderFill = color
+        self._currentTheme.ToggleOn   = color
+        self._currentTheme.Glow       = color
+        self:ApplyTheme(animate)
+    end
+end
+
+-- Initialize with default theme
+ThemeManager:SetTheme("Evok", false)
+
+--// ============================================================
+--// NOTIFICATION MANAGER
+--// ============================================================
+
+local NotificationManager = {}
+NotificationManager.__index = NotificationManager
+NotificationManager._notifications = {}
+NotificationManager._container = nil
+NotificationManager._maxNotifications = 5
+NotificationManager._yOffset = 12
+NotificationManager._notifHeight = 70
+NotificationManager._notifWidth = 280
+
+function NotificationManager:_InitContainer()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "EvokNotifications"
+    screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.DisplayOrder = 999
+
+    if syn and syn.protect_gui then
+        syn.protect_gui(screenGui)
+        screenGui.Parent = game:GetService("CoreGui")
+    elseif gethui then
+        screenGui.Parent = gethui()
+    else
+        screenGui.Parent = game:GetService("CoreGui")
+    end
+
+    self._container = Instance.new("Frame")
+    self._container.Name = "NotifContainer"
+    self._container.AnchorPoint = Vector2.new(1, 1)
+    self._container.Position = UDim2.new(1, -16, 1, -16)
+    self._container.Size = UDim2.new(0, self._notifWidth, 1, -32)
+    self._container.BackgroundTransparency = 1
+    self._container.Parent = screenGui
+end
+
+function NotificationManager:_RearrangeNotifications()
+    local y = 0
+    for i = #self._notifications, 1, -1 do
+        local notif = self._notifications[i]
+        if notif and notif.Frame and notif.Frame.Parent then
+            Utility.TweenObject(
+                notif.Frame,
+                { Position = UDim2.new(0, 0, 1, -(y + self._notifHeight)) },
+                0.3
+            )
+            y = y + self._notifHeight + self._yOffset
+        end
+    end
+end
+
+function NotificationManager:Notify(options)
+    if not self._container then
+        self:_InitContainer()
+    end
+
+    options = options or {}
+    local title    = options.Title    or "Evok"
+    local message  = options.Message  or ""
+    local duration = options.Duration or 4
+    local notifType= options.Type     or "Info"
+    local icon     = options.Icon     or "rbxassetid://7733960981"
+
+    -- Remove oldest if too many
+    if #self._notifications >= self._maxNotifications then
+        local oldest = table.remove(self._notifications, 1)
+        if oldest and oldest.Frame then
+            Utility.TweenObject(oldest.Frame, { Position = UDim2.new(1.2, 0, oldest.Frame.Position.Y.Scale, oldest.Frame.Position.Y.Offset) }, 0.3)
+            task.delay(0.35, function()
+                if oldest.Frame.Parent then
+                    oldest.Frame:Destroy()
                 end
             end)
         end
+    end
+
+    local theme = ThemeManager:GetColor
+
+    -- Accent colors per type
+    local accentColor = ThemeManager:GetColor("Primary")
+    if notifType == "Success" then accentColor = ThemeManager:GetColor("Success")
+    elseif notifType == "Warning" then accentColor = ThemeManager:GetColor("Warning")
+    elseif notifType == "Error"   then accentColor = ThemeManager:GetColor("Error")
+    end
+
+    -- Main frame
+    local frame = Utility.Create("Frame", {
+        Name = "Notification_" .. Utility.GenerateID(),
+        Size = UDim2.new(0, self._notifWidth, 0, self._notifHeight),
+        Position = UDim2.new(1.2, 0, 1, 0),
+        BackgroundColor3 = ThemeManager:GetColor("Surface"),
+        BackgroundTransparency = 0.05,
+        BorderSizePixel = 0,
+        Parent = self._container,
+    })
+
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = frame })
+    Utility.Create("UIStroke", {
+        Color = accentColor,
+        Thickness = 1,
+        Transparency = 0.4,
+        Parent = frame,
+    })
+
+    -- Accent bar on left
+    local accentBar = Utility.Create("Frame", {
+        Size = UDim2.new(0, 3, 1, 0),
+        BackgroundColor3 = accentColor,
+        BorderSizePixel = 0,
+        Parent = frame,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = accentBar })
+
+    -- Glow
+    local glow = Utility.Create("Frame", {
+        Size = UDim2.new(1, 20, 1, 20),
+        Position = UDim2.new(0, -10, 0, -10),
+        BackgroundColor3 = accentColor,
+        BackgroundTransparency = 0.85,
+        BorderSizePixel = 0,
+        ZIndex = frame.ZIndex - 1,
+        Parent = frame,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 14), Parent = glow })
+
+    -- Title label
+    local titleLabel = Utility.Create("TextLabel", {
+        Size = UDim2.new(1, -20, 0, 22),
+        Position = UDim2.new(0, 14, 0, 10),
+        BackgroundTransparency = 1,
+        Text = title,
+        TextColor3 = ThemeManager:GetColor("TextPrimary"),
+        TextSize = 13,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = frame,
+    })
+
+    -- Message label
+    local messageLabel = Utility.Create("TextLabel", {
+        Size = UDim2.new(1, -20, 0, 32),
+        Position = UDim2.new(0, 14, 0, 30),
+        BackgroundTransparency = 1,
+        Text = message,
+        TextColor3 = ThemeManager:GetColor("TextSecondary"),
+        TextSize = 11,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextWrapped = true,
+        Parent = frame,
+    })
+
+    -- Progress bar
+    local progressBg = Utility.Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 2),
+        Position = UDim2.new(0, 0, 1, -2),
+        BackgroundColor3 = Utility.DarkenColor(accentColor, 0.4),
+        BorderSizePixel = 0,
+        Parent = frame,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 2), Parent = progressBg })
+
+    local progressFill = Utility.Create("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = accentColor,
+        BorderSizePixel = 0,
+        Parent = progressBg,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 2), Parent = progressFill })
+
+    -- Track notification
+    local notifEntry = { Frame = frame }
+    table.insert(self._notifications, notifEntry)
+
+    -- Slide in animation
+    self:_RearrangeNotifications()
+    task.delay(0.05, function()
+        Utility.TweenObject(frame, { Position = UDim2.new(0, 0, frame.Position.Y.Scale, frame.Position.Y.Offset) }, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
     end)
 
-    dragArea.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
+    -- Progress bar animation
+    Utility.TweenObject(progressFill, { Size = UDim2.new(0, 0, 1, 0) }, duration, Enum.EasingStyle.Linear)
+
+    -- Auto dismiss
+    task.delay(duration, function()
+        self:_RemoveNotification(notifEntry)
+    end)
+
+    return notifEntry
+end
+
+function NotificationManager:_RemoveNotification(notifEntry)
+    for i, n in ipairs(self._notifications) do
+        if n == notifEntry then
+            table.remove(self._notifications, i)
+            break
+        end
+    end
+
+    if notifEntry.Frame and notifEntry.Frame.Parent then
+        Utility.TweenObject(
+            notifEntry.Frame,
+            { Position = UDim2.new(1.2, 0, notifEntry.Frame.Position.Y.Scale, notifEntry.Frame.Position.Y.Offset) },
+            0.35
+        )
+        task.delay(0.4, function()
+            if notifEntry.Frame.Parent then
+                notifEntry.Frame:Destroy()
+            end
+        end)
+    end
+
+    self:_RearrangeNotifications()
+end
+
+function NotificationManager:RemoveNotification(notifEntry)
+    self:_RemoveNotification(notifEntry)
+end
+
+function NotificationManager:ClearAll()
+    for _, n in ipairs(self._notifications) do
+        if n.Frame and n.Frame.Parent then
+            n.Frame:Destroy()
+        end
+    end
+    self._notifications = {}
+end
+
+--// ============================================================
+--// WATERMARK MODULE
+--// ============================================================
+
+local Watermark = {}
+Watermark.__index = Watermark
+Watermark._visible = true
+Watermark._connection = nil
+Watermark._frame = nil
+
+function Watermark:Create(options)
+    options = options or {}
+    local label    = options.Label    or "Evok"
+    local position = options.Position or UDim2.new(0, 10, 0, 10)
+    local showFPS  = options.ShowFPS  ~= false
+    local showPing = options.ShowPing ~= false
+    local showMem  = options.ShowMem  ~= false
+    local showTime = options.ShowTime ~= false
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "EvokWatermark"
+    screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.DisplayOrder = 998
+
+    if syn and syn.protect_gui then
+        syn.protect_gui(screenGui)
+        screenGui.Parent = game:GetService("CoreGui")
+    elseif gethui then
+        screenGui.Parent = gethui()
+    else
+        screenGui.Parent = game:GetService("CoreGui")
+    end
+
+    local frame = Utility.Create("Frame", {
+        Name = "WatermarkFrame",
+        Position = position,
+        Size = UDim2.new(0, 260, 0, 28),
+        BackgroundColor3 = ThemeManager:GetColor("Surface"),
+        BackgroundTransparency = 0.1,
+        BorderSizePixel = 0,
+        Parent = screenGui,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = frame })
+    Utility.Create("UIStroke", {
+        Color = ThemeManager:GetColor("Primary"),
+        Thickness = 1,
+        Transparency = 0.5,
+        Parent = frame,
+    })
+
+    -- Left accent
+    local accent = Utility.Create("Frame", {
+        Size = UDim2.new(0, 3, 0.8, 0),
+        Position = UDim2.new(0, 0, 0.1, 0),
+        BackgroundColor3 = ThemeManager:GetColor("Primary"),
+        BorderSizePixel = 0,
+        Parent = frame,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 3), Parent = accent })
+
+    -- Label name
+    local nameLabel = Utility.Create("TextLabel", {
+        Size = UDim2.new(0, 60, 1, 0),
+        Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = ThemeManager:GetColor("Primary"),
+        TextSize = 12,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = frame,
+    })
+
+    -- Separator
+    local sep = Utility.Create("Frame", {
+        Size = UDim2.new(0, 1, 0.6, 0),
+        Position = UDim2.new(0, 70, 0.2, 0),
+        BackgroundColor3 = ThemeManager:GetColor("Border"),
+        BorderSizePixel = 0,
+        Parent = frame,
+    })
+
+    -- Stats label
+    local statsLabel = Utility.Create("TextLabel", {
+        Size = UDim2.new(1, -80, 1, 0),
+        Position = UDim2.new(0, 78, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+        TextColor3 = ThemeManager:GetColor("TextSecondary"),
+        TextSize = 11,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = frame,
+    })
+
+    self._frame = frame
+
+    -- FPS tracking
+    local fps = 0
+    local fpsCounter = 0
+    local lastFPSTime = tick()
+
+    self._connection = RunService.Heartbeat:Connect(function()
+        fpsCounter = fpsCounter + 1
+        local now = tick()
+
+        if now - lastFPSTime >= 0.5 then
+            fps = math.floor(fpsCounter / (now - lastFPSTime))
+            fpsCounter = 0
+            lastFPSTime = now
+
+            local parts = {}
+
+            if showFPS then
+                local fpsColor = fps >= 60 and "00FF88" or fps >= 30 and "FFCC00" or "FF4455"
+                table.insert(parts, string.format("<font color='#%s'>%d FPS</font>", fpsColor, fps))
+            end
+
+            if showPing then
+                local ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+                local pingColor = ping <= 80 and "00FF88" or ping <= 150 and "FFCC00" or "FF4455"
+                table.insert(parts, string.format("<font color='#%s'>%dms</font>", pingColor, ping))
+            end
+
+            if showMem then
+                local mem = math.floor(Stats:GetTotalMemoryUsageMb())
+                table.insert(parts, string.format("%dMB", mem))
+            end
+
+            if showTime then
+                local t = os.date("*t")
+                table.insert(parts, string.format("%02d:%02d", t.hour, t.min))
+            end
+
+            statsLabel.Text = table.concat(parts, "  |  ")
+            statsLabel.RichText = true
+        end
+    end)
+
+    return self
+end
+
+function Watermark:SetVisible(visible)
+    self._visible = visible
+    if self._frame then
+        self._frame.Visible = visible
+    end
+end
+
+function Watermark:Toggle()
+    self:SetVisible(not self._visible)
+end
+
+function Watermark:Destroy()
+    if self._connection then
+        self._connection:Disconnect()
+        self._connection = nil
+    end
+    if self._frame and self._frame.Parent then
+        self._frame.Parent.Parent:Destroy()
+    end
+end
+
+--// ============================================================
+--// WINDOW MANAGER
+--// ============================================================
+
+local WindowManager = {}
+WindowManager.__index = WindowManager
+WindowManager._windows = {}
+WindowManager._activeWindow = nil
+WindowManager._zCounter = 10
+
+function WindowManager.new(options)
+    local self = setmetatable({}, WindowManager)
+
+    options = options or {}
+    self._title     = options.Title     or "Evok"
+    self._subtitle  = options.Subtitle  or "Zynn Love you <3"
+    self._size      = options.Size      or Vector2.new(560, 440)
+    self._position  = options.Position  or nil
+    self._resizable = options.Resizable ~= false
+    self._draggable = options.Draggable ~= false
+    self._theme     = options.Theme     or "Evok"
+    self._tabs      = {}
+    self._activeTab = nil
+    self._open      = true
+    self._dragging  = false
+    self._dragStart = nil
+    self._startPos  = nil
+
+    ThemeManager:SetTheme(self._theme, false)
+    self:_Build()
+
+    return self
+end
+
+function WindowManager:_Build()
+    -- ScreenGui
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "EvokUI_" .. self._title
+    screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.DisplayOrder = WindowManager._zCounter
+
+    if syn and syn.protect_gui then
+        syn.protect_gui(screenGui)
+        screenGui.Parent = game:GetService("CoreGui")
+    elseif gethui then
+        screenGui.Parent = gethui()
+    else
+        screenGui.Parent = game:GetService("CoreGui")
+    end
+
+    self._screenGui = screenGui
+
+    -- Default position (centered)
+    local screenSize = Camera.ViewportSize
+    local posX = math.floor((screenSize.X - self._size.X) / 2)
+    local posY = math.floor((screenSize.Y - self._size.Y) / 2)
+    if self._position then
+        posX = self._position.X
+        posY = self._position.Y
+    end
+
+    -- Shadow layer
+    local shadow = Utility.Create("Frame", {
+        Name = "Shadow",
+        Size = UDim2.new(0, self._size.X + 30, 0, self._size.Y + 30),
+        Position = UDim2.new(0, posX - 15, 0, posY - 15),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0,
+        ZIndex = 1,
+        Parent = screenGui,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 18), Parent = shadow })
+    self._shadow = shadow
+
+    -- Glow layer
+    local glow = Utility.Create("Frame", {
+        Name = "Glow",
+        Size = UDim2.new(0, self._size.X + 50, 0, self._size.Y + 50),
+        Position = UDim2.new(0, posX - 25, 0, posY - 25),
+        BackgroundColor3 = ThemeManager:GetColor("Glow"),
+        BackgroundTransparency = 0.75,
+        BorderSizePixel = 0,
+        ZIndex = 1,
+        Parent = screenGui,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 22), Parent = glow })
+    self._glow = glow
+
+    -- Main window frame
+    local mainFrame = Utility.Create("Frame", {
+        Name = "MainFrame",
+        Size = UDim2.new(0, self._size.X, 0, self._size.Y),
+        Position = UDim2.new(0, posX, 0, posY),
+        BackgroundColor3 = ThemeManager:GetColor("Background"),
+        BackgroundTransparency = 0.04,
+        BorderSizePixel = 0,
+        ZIndex = 2,
+        Parent = screenGui,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = mainFrame })
+    Utility.Create("UIStroke", {
+        Color = ThemeManager:GetColor("Border"),
+        Thickness = 1,
+        Transparency = 0.3,
+        Parent = mainFrame,
+    })
+    self._mainFrame = mainFrame
+
+    -- Header
+    local header = Utility.Create("Frame", {
+        Name = "Header",
+        Size = UDim2.new(1, 0, 0, 42),
+        BackgroundColor3 = ThemeManager:GetColor("HeaderBg"),
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+        Parent = mainFrame,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = header })
+    -- Cover bottom corners
+    Utility.Create("Frame", {
+        Size = UDim2.new(1, 0, 0.5, 0),
+        Position = UDim2.new(0, 0, 0.5, 0),
+        BackgroundColor3 = ThemeManager:GetColor("HeaderBg"),
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+        Parent = header,
+    })
+    self._header = header
+
+    -- Header accent stripe
+    local headerAccent = Utility.Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 1),
+        Position = UDim2.new(0, 0, 1, -1),
+        BackgroundColor3 = ThemeManager:GetColor("Primary"),
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        ZIndex = 4,
+        Parent = header,
+    })
+
+    -- Logo dot
+    local logoDot = Utility.Create("Frame", {
+        Size = UDim2.new(0, 8, 0, 8),
+        Position = UDim2.new(0, 14, 0.5, -4),
+        BackgroundColor3 = ThemeManager:GetColor("Primary"),
+        BorderSizePixel = 0,
+        ZIndex = 5,
+        Parent = header,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = logoDot })
+
+    -- Title label
+    local titleLabel = Utility.Create("TextLabel", {
+        Size = UDim2.new(0, 200, 1, 0),
+        Position = UDim2.new(0, 28, 0, 0),
+        BackgroundTransparency = 1,
+        Text = self._title,
+        TextColor3 = ThemeManager:GetColor("TextPrimary"),
+        TextSize = 13,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 5,
+        Parent = header,
+    })
+
+    -- Subtitle label
+    local subtitleLabel = Utility.Create("TextLabel", {
+        Size = UDim2.new(0, 250, 1, 0),
+        Position = UDim2.new(0, 28 + titleLabel.TextBounds.X + 8, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "- " .. self._subtitle,
+        TextColor3 = ThemeManager:GetColor("TextMuted"),
+        TextSize = 11,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 5,
+        Parent = header,
+    })
+
+    -- Close button
+    local closeBtn = Utility.Create("TextButton", {
+        Size = UDim2.new(0, 28, 0, 28),
+        Position = UDim2.new(1, -36, 0.5, -14),
+        BackgroundColor3 = Utility.HexToColor3("#FF5555"),
+        BackgroundTransparency = 0.6,
+        Text = "✕",
+        TextColor3 = Color3.new(1, 1, 1),
+        TextSize = 11,
+        Font = Enum.Font.GothamBold,
+        BorderSizePixel = 0,
+        ZIndex = 5,
+        Parent = header,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = closeBtn })
+    self._closeBtn = closeBtn
+
+    -- Minimize button
+    local minimizeBtn = Utility.Create("TextButton", {
+        Size = UDim2.new(0, 28, 0, 28),
+        Position = UDim2.new(1, -70, 0.5, -14),
+        BackgroundColor3 = Utility.HexToColor3("#FFCC00"),
+        BackgroundTransparency = 0.6,
+        Text = "−",
+        TextColor3 = Color3.new(1, 1, 1),
+        TextSize = 13,
+        Font = Enum.Font.GothamBold,
+        BorderSizePixel = 0,
+        ZIndex = 5,
+        Parent = header,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = minimizeBtn })
+    self._minimizeBtn = minimizeBtn
+
+    -- Tab bar
+    local tabBar = Utility.Create("Frame", {
+        Name = "TabBar",
+        Size = UDim2.new(1, 0, 0, 32),
+        Position = UDim2.new(0, 0, 0, 42),
+        BackgroundColor3 = ThemeManager:GetColor("TabBar"),
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+        Parent = mainFrame,
+    })
+
+    local tabBarAccent = Utility.Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 1),
+        Position = UDim2.new(0, 0, 1, -1),
+        BackgroundColor3 = ThemeManager:GetColor("Border"),
+        BorderSizePixel = 0,
+        ZIndex = 4,
+        Parent = tabBar,
+    })
+
+    local tabList = Utility.Create("ScrollingFrame", {
+        Name = "TabList",
+        Size = UDim2.new(1, -8, 1, 0),
+        Position = UDim2.new(0, 4, 0, 0),
+        BackgroundTransparency = 1,
+        ScrollBarThickness = 0,
+        ScrollingDirection = Enum.ScrollingDirection.X,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ZIndex = 4,
+        Parent = tabBar,
+    })
+
+    local tabListLayout = Utility.Create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 4),
+        Parent = tabList,
+    })
+
+    tabListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        tabList.CanvasSize = UDim2.new(0, tabListLayout.AbsoluteContentSize.X + 8, 0, 0)
+    end)
+
+    self._tabBar = tabBar
+    self._tabList = tabList
+
+    -- Content area
+    local contentArea = Utility.Create("Frame", {
+        Name = "ContentArea",
+        Size = UDim2.new(1, 0, 1, -74),
+        Position = UDim2.new(0, 0, 0, 74),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+        Parent = mainFrame,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = contentArea })
+    self._contentArea = contentArea
+
+    -- Wire up dragging
+    if self._draggable then
+        self:_EnableDragging()
+    end
+
+    -- Wire up close/minimize
+    closeBtn.MouseButton1Click:Connect(function()
+        self:Close()
+    end)
+
+    minimizeBtn.MouseButton1Click:Connect(function()
+        self:ToggleMinimize()
+    end)
+
+    -- Button hover effects
+    closeBtn.MouseEnter:Connect(function()
+        Utility.TweenObject(closeBtn, { BackgroundTransparency = 0.2 }, 0.2)
+    end)
+    closeBtn.MouseLeave:Connect(function()
+        Utility.TweenObject(closeBtn, { BackgroundTransparency = 0.6 }, 0.2)
+    end)
+
+    minimizeBtn.MouseEnter:Connect(function()
+        Utility.TweenObject(minimizeBtn, { BackgroundTransparency = 0.2 }, 0.2)
+    end)
+    minimizeBtn.MouseLeave:Connect(function()
+        Utility.TweenObject(minimizeBtn, { BackgroundTransparency = 0.6 }, 0.2)
+    end)
+
+    -- Open animation
+    mainFrame.Size = UDim2.new(0, self._size.X, 0, 0)
+    mainFrame.BackgroundTransparency = 1
+    Utility.TweenObject(mainFrame, {
+        Size = UDim2.new(0, self._size.X, 0, self._size.Y),
+        BackgroundTransparency = 0.04,
+    }, 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+
+    -- Glow pulse animation
+    self:_StartGlowPulse()
+
+    table.insert(WindowManager._windows, self)
+    WindowManager._activeWindow = self
+end
+
+function WindowManager:_StartGlowPulse()
+    local baseTransparency = 0.75
+    local glowFrame = self._glow
+    local t = 0
+
+    self._glowPulseConn = RunService.Heartbeat:Connect(function(dt)
+        t = t + dt
+        local pulse = 0.07 * math.sin(t * 2.5)
+        if glowFrame and glowFrame.Parent then
+            glowFrame.BackgroundTransparency = baseTransparency + pulse
+        end
+    end)
+end
+
+function WindowManager:_EnableDragging()
+    local dragging   = false
+    local dragOffset = Vector2.new()
+
+    self._header.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging   = true
+            dragOffset = Vector2.new(
+                self._mainFrame.Position.X.Offset - input.Position.X,
+                self._mainFrame.Position.Y.Offset - input.Position.Y
+            )
         end
     end)
 
     UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            local targetPosition = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
-            self:Tween(target, {Position = targetPosition}, dragSpeed, Enum.EasingStyle.Sine)
-        end
-    end)
-end
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local newX = input.Position.X + dragOffset.X
+            local newY = input.Position.Y + dragOffset.Y
 
--- ==============================================================================
--- 🖱️ CUSTOM CURSOR ENGINE
--- ==============================================================================
-Core.Cursor = { Enabled = false, Instance = nil }
+            -- Smooth drag using lerp
+            local currentPos = self._mainFrame.Position
+            local targetPos = UDim2.new(0, newX, 0, newY)
 
-function Core:EnableCustomCursor()
-    if self.Cursor.Enabled or not self.GUI then return end
-    self.Cursor.Enabled = true
-    UserInputService.MouseIconEnabled = false
+            self._mainFrame.Position = targetPos
 
-    local CursorFrame = Instance.new("Frame")
-    CursorFrame.Name = "EvokCursor"
-    CursorFrame.Size = UDim2.new(0, 8, 0, 8)
-    CursorFrame.BackgroundColor3 = self.Themes.Accent
-    CursorFrame.ZIndex = 9999
-    CursorFrame.Parent = self.GUI
-
-    Instance.new("UICorner", CursorFrame).CornerRadius = UDim.new(1, 0)
-    
-    local CursorStroke = Instance.new("UIStroke", CursorFrame)
-    CursorStroke.Color = Color3.fromRGB(0, 0, 0)
-    CursorStroke.Thickness = 1
-
-    self.Cursor.Instance = CursorFrame
-
-    self:SubscribeToTheme(function(theme)
-        if self.Cursor.Instance then self.Cursor.Instance.BackgroundColor3 = theme.Accent end
-    end)
-
-    RunService.RenderStepped:Connect(function()
-        if self.Cursor.Enabled and self.Cursor.Instance then
-            local mouseLoc = UserInputService:GetMouseLocation()
-            self.Cursor.Instance.Position = UDim2.new(0, mouseLoc.X, 0, mouseLoc.Y - 36) 
+            -- Update shadow and glow positions
+            self._shadow.Position = UDim2.new(0, newX - 15, 0, newY - 15)
+            self._glow.Position   = UDim2.new(0, newX - 25, 0, newY - 25)
         end
     end)
 
-    UserInputService.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 and self.Cursor.Enabled then
-            self:Tween(CursorFrame, {Size = UDim2.new(0, 5, 0, 5)}, 0.1)
-        end
-    end)
     UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 and self.Cursor.Enabled then
-            self:Tween(CursorFrame, {Size = UDim2.new(0, 8, 0, 8)}, 0.1)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
         end
     end)
 end
 
--- ==============================================================================
--- 💬 TOOLTIP ENGINE (Hover Manager)
--- ==============================================================================
-Core.Tooltip = { Instance = nil, Active = false }
-
-function Core:InitTooltip()
-    if self.Tooltip.Instance or not self.GUI then return end
-
-    local TooltipFrame = Instance.new("Frame")
-    TooltipFrame.Name = "EvokTooltip"
-    TooltipFrame.Size = UDim2.new(0, 0, 0, 25)
-    TooltipFrame.AutomaticSize = Enum.AutomaticSize.X
-    TooltipFrame.BackgroundColor3 = self.Themes.NotificationBg
-    TooltipFrame.Visible = false
-    TooltipFrame.ZIndex = 9990
-    TooltipFrame.Parent = self.GUI
-
-    Instance.new("UICorner", TooltipFrame).CornerRadius = UDim.new(0, 4)
-    local TStroke = Instance.new("UIStroke", TooltipFrame)
-    TStroke.Color = self.Themes.Border
-
-    local TPadding = Instance.new("UIPadding", TooltipFrame)
-    TPadding.PaddingLeft = UDim.new(0, 8)
-    TPadding.PaddingRight = UDim.new(0, 8)
-
-    local TLabel = Instance.new("TextLabel")
-    TLabel.Size = UDim2.new(1, 0, 1, 0)
-    TLabel.BackgroundTransparency = 1
-    TLabel.Text = ""
-    TLabel.TextColor3 = self.Themes.Text
-    TLabel.Font = Enum.Font.Gotham
-    TLabel.TextSize = 12
-    TLabel.Parent = TooltipFrame
-
-    self:SubscribeToTheme(function(theme)
-        TooltipFrame.BackgroundColor3 = theme.NotificationBg
-        TStroke.Color = theme.Border
-        TLabel.TextColor3 = theme.Text
-    end)
-
-    self.Tooltip.Instance = TooltipFrame
-    self.Tooltip.Label = TLabel
-
-    RunService.RenderStepped:Connect(function()
-        if self.Tooltip.Active and self.Tooltip.Instance then
-            local mouseLoc = UserInputService:GetMouseLocation()
-            self.Tooltip.Instance.Position = UDim2.new(0, mouseLoc.X + 15, 0, mouseLoc.Y - 36 + 15)
-        end
-    end)
-end
-
-function Core:AddTooltip(uiElement: Instance, text: string)
-    if not self.Tooltip.Instance then self:InitTooltip() end
-
-    uiElement.MouseEnter:Connect(function()
-        self.Tooltip.Active = true
-        self.Tooltip.Label.Text = text
-        self.Tooltip.Instance.Visible = true
-        self.Tooltip.Instance.BackgroundTransparency = 1
-        self.Tooltip.Label.TextTransparency = 1
-        
-        self:Tween(self.Tooltip.Instance, {BackgroundTransparency = 0}, 0.2)
-        self:Tween(self.Tooltip.Label, {TextTransparency = 0}, 0.2)
-    end)
-
-    uiElement.MouseLeave:Connect(function()
-        self.Tooltip.Active = false
-        self.Tooltip.Instance.Visible = false
-    end)
-end
-
--- ==============================================================================
--- 🔔 NOTIFICATION SYSTEM (Stackable Toasts)
--- ==============================================================================
-function Core:InitNotificationSystem()
-    local NotifyContainer = Instance.new("Frame")
-    NotifyContainer.Name = "EvokNotifyContainer"
-    NotifyContainer.Size = UDim2.new(0, 300, 1, -40)
-    NotifyContainer.Position = UDim2.new(1, -320, 0, 20)
-    NotifyContainer.BackgroundTransparency = 1
-    NotifyContainer.Parent = self.GUI
-
-    local NotifyLayout = Instance.new("UIListLayout")
-    NotifyLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    NotifyLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-    NotifyLayout.Padding = UDim.new(0, 10)
-    NotifyLayout.Parent = NotifyContainer
-
-    self.NotifyContainer = NotifyContainer
-end
-
-function Core:Notify(config)
-    if not self.NotifyContainer then self:InitNotificationSystem() end
-
-    local title = config.Title or "Notification"
-    local text = config.Text or "System Message"
-    local duration = config.Duration or 5
-    local nType = config.Type or "Info" 
-
-    local sideColor = self.Themes.Accent
-    if nType == "Success" then sideColor = self.Themes.Success
-    elseif nType == "Warning" then sideColor = self.Themes.Warning
-    elseif nType == "Error" then sideColor = self.Themes.Error end
-
-    local NotifFrame = Instance.new("Frame")
-    NotifFrame.Size = UDim2.new(1, 0, 0, 0)
-    NotifFrame.AutomaticSize = Enum.AutomaticSize.Y
-    NotifFrame.Position = UDim2.new(1, 350, 0, 0) 
-    NotifFrame.BackgroundColor3 = self.Themes.NotificationBg
-    NotifFrame.Parent = self.NotifyContainer
-
-    Instance.new("UICorner", NotifFrame).CornerRadius = UDim.new(0, 6)
-    local NStroke = Instance.new("UIStroke", NotifFrame)
-    NStroke.Color = self.Themes.Border
-
-    local SideBar = Instance.new("Frame")
-    SideBar.Size = UDim2.new(0, 4, 1, 0)
-    SideBar.BackgroundColor3 = sideColor
-    SideBar.BorderSizePixel = 0
-    SideBar.Parent = NotifFrame
-    Instance.new("UICorner", SideBar).CornerRadius = UDim.new(0, 6)
-
-    local NPadding = Instance.new("UIPadding", NotifFrame)
-    NPadding.PaddingTop = UDim.new(0, 12)
-    NPadding.PaddingBottom = UDim.new(0, 15)
-    NPadding.PaddingLeft = UDim.new(0, 15)
-    NPadding.PaddingRight = UDim.new(0, 15)
-
-    local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1, -10, 0, 16)
-    TitleLabel.Position = UDim2.new(0, 10, 0, 0)
-    TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = title
-    TitleLabel.TextColor3 = self.Themes.Text
-    TitleLabel.Font = Enum.Font.GothamBold
-    TitleLabel.TextSize = 14
-    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLabel.Parent = NotifFrame
-
-    local TextLabel = Instance.new("TextLabel")
-    TextLabel.Size = UDim2.new(1, -10, 0, 0)
-    TextLabel.Position = UDim2.new(0, 10, 0, 22)
-    TextLabel.AutomaticSize = Enum.AutomaticSize.Y
-    TextLabel.BackgroundTransparency = 1
-    TextLabel.Text = text
-    TextLabel.TextColor3 = self.Themes.TextMuted
-    TextLabel.Font = Enum.Font.Gotham
-    TextLabel.TextSize = 13
-    TextLabel.TextWrapped = true
-    TextLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TextLabel.Parent = NotifFrame
-
-    local TimeBarBg = Instance.new("Frame")
-    TimeBarBg.Size = UDim2.new(1, 0, 0, 3)
-    TimeBarBg.Position = UDim2.new(0, 0, 1, -3)
-    TimeBarBg.BackgroundColor3 = self.Themes.Border
-    TimeBarBg.BorderSizePixel = 0
-    TimeBarBg.Parent = NotifFrame
-    Instance.new("UICorner", TimeBarBg).CornerRadius = UDim.new(0, 4)
-
-    local TimeBarFill = Instance.new("Frame")
-    TimeBarFill.Size = UDim2.new(1, 0, 1, 0)
-    TimeBarFill.BackgroundColor3 = sideColor
-    TimeBarFill.BorderSizePixel = 0
-    TimeBarFill.Parent = TimeBarBg
-    Instance.new("UICorner", TimeBarFill).CornerRadius = UDim.new(0, 4)
-
-    self:Tween(NotifFrame, {Position = UDim2.new(0, 0, 0, 0)}, 0.4, Enum.EasingStyle.Back)
-    local barTween = self:Tween(TimeBarFill, {Size = UDim2.new(0, 0, 1, 0)}, duration, Enum.EasingStyle.Linear)
-
-    local closed = false
-    local function CloseNotification()
-        if closed then return end
-        closed = true
-        barTween:Cancel()
-        local outTween = self:Tween(NotifFrame, {Position = UDim2.new(1, 350, 0, 0)}, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In)
-        outTween.Completed:Wait()
-        NotifFrame:Destroy()
-    end
-
-    local ClickBtn = Instance.new("TextButton")
-    ClickBtn.Size = UDim2.new(1, 0, 1, 0)
-    ClickBtn.BackgroundTransparency = 1
-    ClickBtn.Text = ""
-    ClickBtn.ZIndex = 10
-    ClickBtn.Parent = NotifFrame
-    ClickBtn.MouseButton1Click:Connect(CloseNotification)
-
-    task.delay(duration, CloseNotification)
-end
-
--- ==============================================================================
--- 🖼️ WINDOW MANAGER (BUILDER ENGINE)
--- Design: Matcha Style (Top Navigation), Dark/Pink, 650x600
--- ==============================================================================
-function Core:CreateWindow(config)
-    Core.Logger:Log("Initializing Evok Window Manager (Matcha Design)...")
-    
-    local title = config.Title or "Evok - Zynn Love you <3"
-    local size = config.Size or UDim2.new(0, 650, 0, 600) 
-    
-    local targetGui
-    if pcall(function() return CoreGui.Name end) then
-        targetGui = CoreGui
+function WindowManager:SetSize(width, height, animate)
+    self._size = Vector2.new(width, height)
+    if animate then
+        Utility.TweenObject(self._mainFrame, { Size = UDim2.new(0, width, 0, height) }, 0.35)
     else
-        targetGui = LocalPlayer:WaitForChild("PlayerGui")
+        self._mainFrame.Size = UDim2.new(0, width, 0, height)
     end
+end
 
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "EvokUI_" .. HttpService:GenerateGUID(false)
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-    ScreenGui.Parent = targetGui
-    self.GUI = ScreenGui
-
-    local MainFrame = Instance.new("Frame")
-    MainFrame.Name = "MainFrame"
-    MainFrame.Size = size
-    MainFrame.Position = UDim2.new(0.5, -size.X.Offset/2, 0.5, -size.Y.Offset/2)
-    MainFrame.BackgroundColor3 = self.Themes.Background
-    MainFrame.BorderSizePixel = 0
-    MainFrame.ClipsDescendants = true
-    MainFrame.Parent = ScreenGui
-
-    local MainCorner = Instance.new("UICorner")
-    MainCorner.CornerRadius = UDim.new(0, 8)
-    MainCorner.Parent = MainFrame
-
-    local MainStroke = Instance.new("UIStroke")
-    MainStroke.Color = self.Themes.Border
-    MainStroke.Thickness = 1
-    MainStroke.Parent = MainFrame
-
-    -- ==========================================
-    -- TOP BAR (Title + Tab Navigation)
-    -- ==========================================
-    local TopBar = Instance.new("Frame")
-    TopBar.Name = "TopBar"
-    TopBar.Size = UDim2.new(1, 0, 0, 70)
-    TopBar.BackgroundColor3 = self.Themes.TopBar
-    TopBar.BorderSizePixel = 0
-    TopBar.Parent = MainFrame
-
-    local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Name = "Title"
-    TitleLabel.Size = UDim2.new(1, -30, 0, 30)
-    TitleLabel.Position = UDim2.new(0, 15, 0, 5)
-    TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = title
-    TitleLabel.TextColor3 = self.Themes.TextMuted
-    TitleLabel.Font = Enum.Font.GothamSemibold
-    TitleLabel.TextSize = 13
-    TitleLabel.RichText = true
-    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLabel.Parent = TopBar
-    
-    -- Replace the first word with Accent color for Matcha feel
-    local firstWord, rest = title:match("([^%s]+)(.*)")
-    if firstWord then
-        TitleLabel.Text = string.format("<font color='%s'>%s</font>%s", self.Math.Color.ToHex(self.Themes.Accent), firstWord, rest)
+function WindowManager:SetPosition(x, y, animate)
+    if animate then
+        Utility.TweenObject(self._mainFrame, { Position = UDim2.new(0, x, 0, y) }, 0.35)
+        Utility.TweenObject(self._shadow,    { Position = UDim2.new(0, x - 15, 0, y - 15) }, 0.35)
+        Utility.TweenObject(self._glow,      { Position = UDim2.new(0, x - 25, 0, y - 25) }, 0.35)
+    else
+        self._mainFrame.Position = UDim2.new(0, x, 0, y)
+        self._shadow.Position    = UDim2.new(0, x - 15, 0, y - 15)
+        self._glow.Position      = UDim2.new(0, x - 25, 0, y - 25)
     end
+end
 
-    local TabContainer = Instance.new("Frame")
-    TabContainer.Name = "TabContainer"
-    TabContainer.Size = UDim2.new(1, -30, 0, 30)
-    TabContainer.Position = UDim2.new(0, 15, 0, 35)
-    TabContainer.BackgroundTransparency = 1
-    TabContainer.Parent = TopBar
-    
-    local TabListLayout = Instance.new("UIListLayout")
-    TabListLayout.FillDirection = Enum.FillDirection.Horizontal
-    TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    TabListLayout.Padding = UDim.new(0, 15)
-    TabListLayout.Parent = TabContainer
+function WindowManager:ToggleVisibility()
+    self._open = not self._open
+    if self._open then
+        self._mainFrame.Visible = true
+        Utility.TweenObject(self._mainFrame, {
+            BackgroundTransparency = 0.04,
+            Size = UDim2.new(0, self._size.X, 0, self._size.Y),
+        }, 0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    else
+        Utility.TweenObject(self._mainFrame, {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, self._size.X, 0, 0),
+        }, 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        task.delay(0.35, function()
+            if not self._open then
+                self._mainFrame.Visible = false
+            end
+        end)
+    end
+end
 
-    local TopLine = Instance.new("Frame")
-    TopLine.Size = UDim2.new(1, 0, 0, 1)
-    TopLine.Position = UDim2.new(0, 0, 1, -1)
-    TopLine.BackgroundColor3 = self.Themes.Border
-    TopLine.BorderSizePixel = 0
-    TopLine.Parent = TopBar
+function WindowManager:ToggleMinimize()
+    self._minimized = not self._minimized
+    if self._minimized then
+        Utility.TweenObject(self._mainFrame, {
+            Size = UDim2.new(0, self._size.X, 0, 42),
+        }, 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    else
+        Utility.TweenObject(self._mainFrame, {
+            Size = UDim2.new(0, self._size.X, 0, self._size.Y),
+        }, 0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    end
+end
 
-    -- ==========================================
-    -- PAGE CONTAINER
-    -- ==========================================
-    local PageContainer = Instance.new("Frame")
-    PageContainer.Name = "PageContainer"
-    PageContainer.Size = UDim2.new(1, -20, 1, -80)
-    PageContainer.Position = UDim2.new(0, 10, 0, 75)
-    PageContainer.BackgroundTransparency = 1
-    PageContainer.Parent = MainFrame
+function WindowManager:Close()
+    self._open = false
 
-    self:MakeDraggable(TopBar, MainFrame)
+    -- Exit animation
+    Utility.TweenObject(self._mainFrame, {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, self._size.X, 0, 0),
+    }, 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 
-    self:SubscribeToTheme(function(theme)
-        MainFrame.BackgroundColor3 = theme.Background
-        MainStroke.Color = theme.Border
-        TopBar.BackgroundColor3 = theme.TopBar
-        TopLine.BackgroundColor3 = theme.Border
-        if firstWord then
-            TitleLabel.Text = string.format("<font color='%s'>%s</font>%s", self.Math.Color.ToHex(theme.Accent), firstWord, rest)
+    Utility.TweenObject(self._glow, { BackgroundTransparency = 1 }, 0.3)
+    Utility.TweenObject(self._shadow, { BackgroundTransparency = 1 }, 0.3)
+
+    task.delay(0.35, function()
+        if self._glowPulseConn then
+            self._glowPulseConn:Disconnect()
+        end
+        if self._screenGui then
+            self._screenGui:Destroy()
+        end
+    end)
+end
+
+function WindowManager:CreateTab(name, icon)
+    local tab = {}
+    tab.Name = name
+    tab.Icon = icon
+    tab.Content = nil
+    tab.Button  = nil
+
+    -- Tab button
+    local btn = Utility.Create("TextButton", {
+        Name = "Tab_" .. name,
+        Size = UDim2.new(0, 0, 1, -6),
+        AutomaticSize = Enum.AutomaticSize.X,
+        Position = UDim2.new(0, 0, 0, 3),
+        BackgroundColor3 = ThemeManager:GetColor("TabInactive"),
+        BackgroundTransparency = 0.6,
+        Text = "",
+        BorderSizePixel = 0,
+        LayoutOrder = #self._tabs + 1,
+        ZIndex = 5,
+        Parent = self._tabList,
+    })
+    Utility.Create("UICorner", { CornerRadius = UDim.new(0, 5), Parent = btn })
+    Utility.Create("UIPadding", {
+        PaddingLeft  = UDim.new(0, 10),
+        PaddingRight = UDim.new(0, 10),
+        Parent = btn,
+    })
+
+    local btnLabel = Utility.Create("TextLabel", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = name,
+        TextColor3 = ThemeManager:GetColor("TextMuted"),
+        TextSize = 11,
+        Font = Enum.Font.Gotham,
+        ZIndex = 6,
+        Parent = btn,
+    })
+
+    -- Tab content frame
+    local contentFrame = Utility.Create("ScrollingFrame", {
+        Name = "Content_" .. name,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = ThemeManager:GetColor("ScrollBar"),
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        Visible = false,
+        ZIndex = 3,
+        Parent = self._contentArea,
+    })
+
+    Utility.Create("UIPadding", {
+        PaddingTop    = UDim.new(0, 8),
+        PaddingBottom = UDim.new(0, 8),
+        PaddingLeft   = UDim.new(0, 8),
+        PaddingRight  = UDim.new(0, 8),
+        Parent = contentFrame,
+    })
+
+    local contentLayout = Utility.Create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 6),
+        Parent = contentFrame,
+    })
+
+    tab.Button  = btn
+    tab.Label   = btnLabel
+    tab.Content = contentFrame
+    tab.Layout  = contentLayout
+
+    -- Tab click handler
+    btn.MouseButton1Click:Connect(function()
+        self:SelectTab(tab)
+    end)
+
+    btn.MouseEnter:Connect(function()
+        if self._activeTab ~= tab then
+            Utility.TweenObject(btn, { BackgroundTransparency = 0.4 }, 0.2)
+            Utility.TweenObject(btnLabel, { TextColor3 = ThemeManager:GetColor("TextSecondary") }, 0.2)
         end
     end)
 
-    MainFrame.Size = UDim2.new(0, 0, 0, 0)
-    self:Tween(MainFrame, {Size = size}, 0.5, Enum.EasingStyle.Quint)
+    btn.MouseLeave:Connect(function()
+        if self._activeTab ~= tab then
+            Utility.TweenObject(btn, { BackgroundTransparency = 0.6 }, 0.2)
+            Utility.TweenObject(btnLabel, { TextColor3 = ThemeManager:GetColor("TextMuted") }, 0.2)
+        end
+    end)
 
-    return {
-        Core = self,
-        GUI = ScreenGui,
-        MainFrame = MainFrame,
-        TopBar = TopBar, 
-        TabContainer = TabContainer,
-        PageContainer = PageContainer,
-        Tabs = {},
-        CurrentTab = nil
-    }
+    table.insert(self._tabs, tab)
+
+    -- Auto-select first tab
+    if #self._tabs == 1 then
+        self:SelectTab(tab)
+    end
+
+    return tab
 end
 
-table.freeze(Core.Easing)
-table.freeze(Core.Math)
+function WindowManager:SelectTab(targetTab)
+    -- Deactivate all
+    for _, tab in ipairs(self._tabs) do
+        tab.Content.Visible = false
+        Utility.TweenObject(tab.Button, {
+            BackgroundColor3 = ThemeManager:GetColor("TabInactive"),
+            BackgroundTransparency = 0.6,
+        }, 0.25)
+        Utility.TweenObject(tab.Label, {
+            TextColor3 = ThemeManager:GetColor("TextMuted"),
+            -- Font cannot tween but we swap it
+        }, 0.25)
+        tab.Label.Font = Enum.Font.Gotham
+    end
 
-return Core
+    -- Activate target
+    self._activeTab = targetTab
+    targetTab.Content.Visible = true
+    Utility.TweenObject(targetTab.Button, {
+        BackgroundColor3 = ThemeManager:GetColor("TabActive"),
+        BackgroundTransparency = 0.1,
+    }, 0.25)
+    Utility.TweenObject(targetTab.Label, {
+        TextColor3 = Color3.new(0, 0, 0),
+    }, 0.25)
+    targetTab.Label.Font = Enum.Font.GothamBold
+end
+
+--// ============================================================
+--// EXPORTS
+--// ============================================================
+
+return {
+    Easing              = Easing,
+    Utility             = Utility,
+    ThemeManager        = ThemeManager,
+    NotificationManager = NotificationManager,
+    Watermark           = Watermark,
+    WindowManager       = WindowManager,
+}
